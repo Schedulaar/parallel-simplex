@@ -4,7 +4,7 @@
 #include <vector>
 
 int n, m;
-int index (i, j) {
+int index (int i, int j) {
   return i*n + j;
 }
 
@@ -18,16 +18,9 @@ void switchNumbers (int * x, int * y) {
  * e and l are indices of N and B.
  */
 void pivot (
-        int * N, int * B, double ** A, double * b, double * c, double v, int l, int e, // inputs
-        int * nN, int * nB, double ** nA, double *nB, double * nc, double * nv         // outputs
+        int * N, int * B, double * A, double * b, double * c, double v, int l, int e, // inputs
+        int * nN, int * nB, double * nA, double *nb, double * nc, double * nv         // outputs
       ) {
-  double * nA = new double[n*m];
-  double * nb = new double[m];
-  double * nc = new double[m];
-  double nv;
-  int * nN = new int[m];
-  int * nB = new int[n]
-
   // We will put x_N[e] into row l of the matrix and conversely put x_B[l] into column e.
 
   // Compute the coefficients of the equation for new basic variable x_N[e].
@@ -44,7 +37,7 @@ void pivot (
     nb[i] = b[i] - A[index(i,e)] * nb[l];
     for (int j = 0; j < m; j++) {
       if (j == e) continue;
-      nA[index(i,j)] = A[index(i,j)] - A[index(i,e)]*nA[index(l,j)]
+      nA[index(i,j)] = A[index(i,j)] - A[index(i,e)]*nA[index(l,j)];
     }
     nA[index(i,e)] = -A[index(i,e)]*nA[index(l, e)];
   }
@@ -66,7 +59,39 @@ void pivot (
   }
 }
 
-int main(int argc, char **argv) {
+void test () {
+  n = 3;
+  m = 3;
+  // inputs
+  int N[] = { 0,1,2 };
+  int B[] = { 3,4,5 };
+  double A[] = {
+          1,1,3,
+          2,2,5,
+          4,1,2
+  };
+  double b[] = {
+          30,
+          24,
+          36
+  };
+  double c[] = {3, 1, 2, 0, 0, 0};
+  double v = 0;
+  int l = 2;
+  int e = 0;
 
+  // outputs
+  double nA[n*m];
+  double nb[m];
+  double nc[m];
+  double nv;
+  int nN[m];
+  int nB[n];
+
+  pivot(N, B, A, b, c, v, l, e, nN, nB, nA, nb, nc, &nv);
+}
+
+int main(int argc, char **argv) {
+  test();
   return 0;
 }
