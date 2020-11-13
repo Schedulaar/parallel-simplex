@@ -15,7 +15,8 @@ void swap (int & x, int & y) {
 }
 
 /**
- * e and l are indices of N and B.
+ * The variables e and l are indices of N and B.
+ * It is possible to use the input variables as output variables as well.
  */
 void pivot (
         int N[], int B[], double A[], double b[], double c[], double v, int l, int e, // inputs
@@ -51,11 +52,13 @@ void pivot (
   nc[e] = -c[e]*nA[index(l,e)];
 
   // Compute new sets of basic and nonbasic variables
-  for (int i = 0; i < n; i++) {
-    nB[i] = B[i];
-  }
-  for (int j = 0; j < m; j++) {
-    nN[j] = N[j];
+  if (nB != B || N != nN) {
+    for (int i = 0; i < n; i++) {
+      nB[i] = B[i];
+    }
+    for (int j = 0; j < m; j++) {
+      nN[j] = N[j];
+    }
   }
   swap(nB[l], nN[e]);
 }
