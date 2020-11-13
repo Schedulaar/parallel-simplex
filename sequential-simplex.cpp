@@ -1,7 +1,5 @@
 #include <cstdio>
-#include <cmath>
-#include <cstring>
-#include <vector>
+
 
 int n, m;
 int index (int i, int j) {
