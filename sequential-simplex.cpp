@@ -83,6 +83,9 @@ std::string simplex_slack(
 
     pivot(N, B, A, b, c, v, imin, e, // inputs
           N, B, A, b, c, v);      // outputs
+
+    for (e = 0; e < m; e++)
+      if (c[e] > 1e-100) break;
   }
 
   for (int i = 0; i < n; i++)
@@ -122,7 +125,14 @@ void test() {
   int nN[m];
   int nB[n];
 
-  pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
+  double x[n+m];
+
+  simplex_slack(N, B, A, b, c, v, x);
+  // pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
+  for (int i = 0; i < n+m; i++) {
+    printf("x%i=%lf, ", i, x[i]);
+  }
+  printf("\n");
   printf("%i,%i,%i", N[0], c[1], v);
   printf("%i,%i,%i", A[0], B[1], b[2]);
 }
