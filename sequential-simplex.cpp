@@ -8,18 +8,18 @@ int index (int i, int j) {
   return i*n + j;
 }
 
-void switchNumbers (int * x, int * y) {
-  int tmp = *x;
-  *x = *y;
-  *y = tmp;
+void swap (int & x, int & y) {
+  int tmp = x;
+  x = y;
+  y = tmp;
 }
 
 /**
  * e and l are indices of N and B.
  */
 void pivot (
-        int * N, int * B, double * A, double * b, double * c, double v, int l, int e, // inputs
-        int * nN, int * nB, double * nA, double *nb, double * nc, double * nv         // outputs
+        int N[], int B[], double A[], double b[], double c[], double v, int l, int e, // inputs
+        int nN[], int nB[], double nA[], double nb[], double nc[], double & nv         // outputs
       ) {
   // We will put x_N[e] into row l of the matrix and conversely put x_B[l] into column e.
 
@@ -43,7 +43,7 @@ void pivot (
   }
 
   // Compute the objective function
-  *nv = v + c[N[e]] * nb[l];
+  nv = v + c[e] * nb[l];
   for (int j = 0; j < m; j++) {
     if (j == e) continue;
     nc[j] = c[j] - c[e]*nA[index(l,j)];
@@ -52,11 +52,12 @@ void pivot (
 
   // Compute new sets of basic and nonbasic variables
   for (int i = 0; i < n; i++) {
-    nB[i] = (i == l) ? N[e] : B[i];
+    nB[i] = B[i];
   }
   for (int j = 0; j < m; j++) {
-    nN[j] = (j == e) ? B[l] : N[j];
+    nN[j] = N[j];
   }
+  swap(nB[l], nN[e]);
 }
 
 void test () {
@@ -75,7 +76,7 @@ void test () {
           24,
           36
   };
-  double c[] = {3, 1, 2, 0, 0, 0};
+  double c[] = {3, 1, 2};
   double v = 0;
   int l = 2;
   int e = 0;
@@ -88,7 +89,9 @@ void test () {
   int nN[m];
   int nB[n];
 
-  pivot(N, B, A, b, c, v, l, e, nN, nB, nA, nb, nc, &nv);
+  pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
+  printf("%i,%i,%i", N[0],c[1],v);
+  printf("%i,%i,%i", A[0],B[1],b[2]);
 }
 
 int main(int argc, char **argv) {
