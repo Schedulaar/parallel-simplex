@@ -65,7 +65,7 @@ void pivot(
 
 std::string simplex_slack(
         int N[], int B[], double A[], double b[], double c[], double v, // inputs
-        double x[]                                                      // outputs
+        double x[], double &z                                           // outputs
 ) {
   int e;
   for (e = 0; e < m; e++)
@@ -92,6 +92,7 @@ std::string simplex_slack(
     x[B[i]] = b[i];
   for (int j = 0; j < m; j++)
     x[N[j]] = 0;
+  z = v;
 
   return "success";
 }
@@ -126,15 +127,14 @@ void test() {
   int nB[n];
 
   double x[n+m];
+  double z;
 
-  simplex_slack(N, B, A, b, c, v, x);
+  simplex_slack(N, B, A, b, c, v, x, z);
   // pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
+  printf("Found optimal solution with object value %lf:\n", z);
   for (int i = 0; i < n+m; i++) {
-    printf("x%i=%lf, ", i, x[i]);
+    printf("x%i=%lf,\n", i, x[i]);
   }
-  printf("\n");
-  printf("%i,%i,%i", N[0], c[1], v);
-  printf("%i,%i,%i", A[0], B[1], b[2]);
 }
 
 int main(int argc, char **argv) {
