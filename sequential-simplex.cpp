@@ -128,13 +128,18 @@ void test() {
 
   double x[n+m];
   double z;
-
-  simplex_slack(N, B, A, b, c, v, x, z);
   // pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
-  printf("Found optimal solution with object value %lf:\n", z);
-  for (int i = 0; i < n+m; i++) {
-    printf("x%i=%lf,\n", i, x[i]);
-  }
+
+  std::string result = simplex_slack(N, B, A, b, c, v, x, z);
+  if ( result == "success") {
+    printf("Found optimal solution with object value %lf:\n", z);
+    for (int i = 0; i < n + m; i++) {
+      printf("x%i=%lf,\n", i, x[i]);
+    }
+  } else if (result == "unbounded") {
+    printf("The problem is unbounded!\n");
+  } else
+    printf("Something definitely went wrong!\n");
 }
 
 int main(int argc, char **argv) {
