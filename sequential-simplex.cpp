@@ -19,47 +19,47 @@ void swap(int &x, int &y) {
  */
 void pivot(
         int N[], int B[], double A[], double b[], double c[], double v, int l, int e, int n, int m, // inputs
-        int nN[], int nB[], double nA[], double nb[], double nc[], double &nv                       // outputs
+        int oN[], int oB[], double oA[], double ob[], double oc[], double &ov                       // outputs
 ) {
   // We will put x_N[e] into row l of the matrix and conversely put x_B[l] into column e.
 
   // Compute the coefficients of the equation for new basic variable x_N[e].
-  nb[l] = b[l] / A[index(l, e, n)];
+  ob[l] = b[l] / A[index(l, e, n)];
   for (int j = 0; j < n; j++) {
     if (j == e) continue;
-    nA[index(l, j, n)] = A[index(l, j, n)] / A[index(l, e, n)];
+    oA[index(l, j, n)] = A[index(l, j, n)] / A[index(l, e, n)];
   }
-  nA[index(l, e, n)] = 1 / A[index(l, e, n)];
+  oA[index(l, e, n)] = 1 / A[index(l, e, n)];
 
   // Compute the coefficients of the remaining constraints.
   for (int i = 0; i < m; i++) {
     if (i == l) continue;
-    nb[i] = b[i] - A[index(i, e, n)] * nb[l];
+    ob[i] = b[i] - A[index(i, e, n)] * ob[l];
     for (int j = 0; j < n; j++) {
       if (j == e) continue;
-      nA[index(i, j, n)] = A[index(i, j, n)] - A[index(i, e, n)] * nA[index(l, j, n)];
+      oA[index(i, j, n)] = A[index(i, j, n)] - A[index(i, e, n)] * oA[index(l, j, n)];
     }
-    nA[index(i, e, n)] = -A[index(i, e, n)] * nA[index(l, e, n)];
+    oA[index(i, e, n)] = -A[index(i, e, n)] * oA[index(l, e, n)];
   }
 
   // Compute the objective function
-  nv = v + c[e] * nb[l];
+  ov = v + c[e] * ob[l];
   for (int j = 0; j < n; j++) {
     if (j == e) continue;
-    nc[j] = c[j] - c[e] * nA[index(l, j, n)];
+    oc[j] = c[j] - c[e] * oA[index(l, j, n)];
   }
-  nc[e] = -c[e] * nA[index(l, e, n)];
+  oc[e] = -c[e] * oA[index(l, e, n)];
 
   // Compute new sets of basic and nonbasic variables
-  if (nB != B || N != nN) {
+  if (oB != B || N != oN) {
     for (int j = 0; j < m; j++) {
-      nB[j] = B[j];
+      oB[j] = B[j];
     }
     for (int i = 0; i < n; i++) {
-      nN[i] = N[i];
+      oN[i] = N[i];
     }
   }
-  swap(nB[l], nN[e]);
+  swap(oB[l], oN[e]);
 }
 
 std::string simplex_slack(
