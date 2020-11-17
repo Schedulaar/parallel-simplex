@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cmath>
 #include <string>
 
 int index(int i, int j, int rowLength) {
