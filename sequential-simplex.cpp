@@ -14,6 +14,20 @@ void swap(int &x, int &y) {
   y = tmp;
 }
 
+void print_slack(int N[], int B[], double A[], double b[], double c[], double v, int n, int m) {
+  printf("--------------------\n");
+  printf("z  = %+.2f", v);
+  for (int j = 0; j < n; j++)
+    printf(" + %+.2f x%i", c[j], N[j]);
+  printf("\n");
+  for (int i = 0; i < m; i++) {
+    printf("x%i = %+.2f", B[i], b[i]);
+    for (int j = 0; j < n; j++)
+      printf(" + %+.2f x%i", A[index(i, j, n)], N[j]);
+    printf("\n");
+  }
+}
+
 /**
  * The variables e and l are indices of N and B.
  * It is possible to use the input variables as output variables as well.
@@ -67,6 +81,8 @@ std::string simplex_slack(
         int N[], int B[], double A[], double b[], double c[], double v, int n, int m, // inputs
         double x[], double &z                                                         // outputs
 ) {
+
+  print_slack(N, B, A, b, c, v, n, m);
   int e;
   for (e = 0; e < m; e++)
     if (c[e] > EPS) break;
@@ -83,6 +99,8 @@ std::string simplex_slack(
 
     pivot(N, B, A, b, c, v, imin, e, n, m, // inputs
           N, B, A, b, c, v);            // outputs
+
+    print_slack(N, B, A, b, c, v, n, m);
 
     for (e = 0; e < m; e++)
       if (c[e] > EPS) break;
