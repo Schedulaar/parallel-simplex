@@ -144,10 +144,10 @@ std::string simplex(
 
     for (int i = 0; i < n + 1; i++) {
       auxc[i] = i == n ? -1. : 0.;
-      auxN[i] = i;
+      auxN[i] = i == n ? n+m : i;
     }
     for (int j = 0; j < m; j++) {
-      auxB[j] = n + 1 + j;
+      auxB[j] = n + j;
       auxb[j] = b[j];
     }
     for (int i = 0; i < m; i++) {
@@ -160,7 +160,7 @@ std::string simplex(
     pivot(auxN, auxB, auxA, auxb, auxc, auxv, k, n, n + 1, m,
           auxN, auxB, auxA, auxb, auxc, auxv);
     double auxz;
-    double *xInit = new double[n + 1 + m];
+    double *xInit = new double[n + m + 1];
     std::string result = simplex_slack(auxN, auxB, auxA, auxb, auxc, auxv, n + 1, m,
                                        xInit, auxz);
     if (result != "success") {
@@ -170,39 +170,36 @@ std::string simplex(
     }
     if (auxz > EPS) return "infeasible";
 
-    // Check whether n is a basis variable. If so, do a non-degenerate pivot.
-    int l = -1;
-    for (int i = 0; i < m; i++) {
-      if (auxB[i] != n) continue;
-      l = i;
-      break;
-    }
-    if (l != -1) {
-      int e = 0;
-      for (int j = 1; j < m; j++) {
-        if (std::abs(auxA[index(e, j, n + 1)]) > std::abs(auxA[index(e, l, n + 1)]))
-          e = j;
+    // Check whether n+m is a basis variable. If so, do a non-degenerate pivot.
+    for (int l = 0; l < m; l++) {
+      if (auxB[l] == n + m){
+        int e = 0;
+        for (int j = 1; j < m; j++) {
+          if (std::abs(auxA[index(e, j, n + 1)]) > std::abs(auxA[index(e, l, n + 1)]))
+            e = j;
+        }
+        pivot(auxN, auxB, auxA, auxb, auxc, auxv, l, e, n + 1, m,
+              auxN, auxB, auxA, auxb, auxc, auxv);
+        break;
       }
-      pivot(auxN, auxB, auxA, auxb, auxc, auxv, l, e, n + 1, m,
-            auxN, auxB, auxA, auxb, auxc, auxv);
     }
 
     // Finally we have an initial solution.
-    // Now, we remove variable n again.
+    // Now, we remove variable n+m again.
 
     int remCol = n + 1;
     for (int j = 0; j < n + 1; j++) {
-      if (auxN[j] == n)
+      if (auxN[j] == n+m)
         remCol = j;
       else
-        N[j > remCol ? j - 1 : j] = auxN[j] < n ? auxN[j] : auxN[j] - 1;
+        N[j > remCol ? j - 1 : j] = auxN[j];
     }
     for (int i = 0; i < m; i++) {
-      B[i] = auxB[i] < n ? auxB[i] : auxB[i] - 1;
+      B[i] = auxB[i];
       b[i] = auxb[i];
     }
 
-    // Remove column where variable x_n was in
+    // Remove column where variable x_{n+m} was in
     for (int j = 0; j < n + 1; j++) {
       if (j == remCol) continue;
       for (int i = 0; i < m; i++) {
