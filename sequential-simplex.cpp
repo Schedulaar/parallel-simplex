@@ -18,12 +18,12 @@ void print_slack(int N[], int B[], double A[], double b[], double c[], double v,
   printf("--------------------\n");
   printf("z  = %+.2f", v);
   for (int j = 0; j < n; j++)
-    printf(" + %+.2f x%i", c[j], N[j]);
+    printf(" %+.2f*x%i", c[j], N[j]);
   printf("\n");
   for (int i = 0; i < m; i++) {
     printf("x%i = %+.2f", B[i], b[i]);
     for (int j = 0; j < n; j++)
-      printf(" + %+.2f x%i", A[index(i, j, n)], N[j]);
+      printf(" %+.2f*x%i", -A[index(i, j, n)], N[j]);
     printf("\n");
   }
 }
