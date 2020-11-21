@@ -7,6 +7,7 @@
 long M, N;
 double EPS = 1e-20;
 enum STATUS { RUNNING, SUCCESS, UNBOUNDED };
+bool PRINT_TABLES = true;
 
 double **matallocd(size_t m, size_t n) {
   /* This function allocates an m x n matrix of doubles */
@@ -81,7 +82,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   long e = -1; // Entering index
   long l = -1; // Leaving index
   double *aie = new double[nloc(M, s, m)];
-  double *alj = new double[nloc(n, t, n)];
+  double *alj = new double[nloc(N, t, n)];
   double bl;
   double ce;
   int status = RUNNING;
@@ -105,7 +106,8 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   bsp_sync();
 
   while (true) {
-    print_tableau(M, N, s, t, m, n, A, c, b, v);
+    if (PRINT_TABLES)
+      print_tableau(M, N, s, t, m, n, A, c, b, v);
 
     // Find some e maximizing c[e]
     e = 0; // global column index
@@ -196,7 +198,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
         break;
       }
       l = baLocalMinimaIndices[globalMinimumProc];
-      if (s == 0) printf("%li enters; %li leaves.\n", e, l);
+      if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
 
       // Now share l, A_ie and c_e with the rest of the row
       for (long k = 0; k < N; k++) {
@@ -260,10 +262,34 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
         v += ce * bl;
     }
   }
+
+  bsp_pop_reg(aie);
+  bsp_pop_reg(alj);
+  bsp_pop_reg(b);
+  bsp_pop_reg(baLocalMinima);
+  bsp_pop_reg(baLocalMinimaIndices);
+  bsp_pop_reg(&e);
+  bsp_pop_reg(&l);
+  bsp_pop_reg(&bl);
+  bsp_pop_reg(&status);
+
+  if (s == 0) {
+    bsp_pop_reg(cLocalMaxima);
+    bsp_pop_reg(cLocalMaximaIndices);
+    bsp_pop_reg(&ce);
+    delete [] cLocalMaxima;
+    delete [] cLocalMaximaIndices;
+  }
+
+  delete [] baLocalMinima;
+  delete [] baLocalMinimaIndices;
+  delete [] alj;
+  delete [] aie;
 }
 
 
 void simplex_test() {
+  PRINT_TABLES = false;
   bsp_begin(M * N);
   long p = bsp_nprocs(); /* p=M*N */
   long pid = bsp_pid();
@@ -296,17 +322,11 @@ void simplex_test() {
   long s = pid % M;  /* 0 <= s < M */
   long t = pid / M;  /* 0 <= t < N */
 
-  /* Allocate and initialize tableau
-   * Tableau looks like the following:
-   * z  | c1  | c2  | ... | cn
-   * b1 | a11 | a12 | ... | a1n
-   * b2 | a21 | a22 | ... | a2n
-   *            ...
-   * bm | am1 | am2 | ... | amn
-   */
-  long nlr = nloc(M + 1, s, n); /* number of local rows */
-  long nlc = nloc(N + 1, t, n); /* number of local columns */
-  double **T = matallocd(nlr, nlc);
+  long nlr = nloc(M, s, n); /* number of local rows */
+  long nlc = nloc(N, t, n); /* number of local columns */
+  double **A = matallocd(nlr, nlc);
+  double *b;
+  double *c;
 
   if (s == 0 && t == 0) {
     printf("Linear Optimization of %ld by %ld matrix\n", n, n);
@@ -316,12 +336,18 @@ void simplex_test() {
   std::uniform_real_distribution<double> unif(0., 1.);
   std::default_random_engine re;
   for (long i = 0; i < nlr; i++) {
-    for (long j = 0; j < nlc; j++) {
-      if (i * M == 0 && j * N == 0)
-        T[i][j] = 0; // start with constant 0 for objective function
-      else
-        T[i][j] = unif(re); // random variable between 0 and 1
-    }
+    for (long j = 0; j < nlc; j++)
+      A[i][j] = unif(re); // random variable between 0 and 1
+  }
+  if (t == 0) {
+    b = new double[nlr];
+    for (long i = 0; i < nlr; i++)
+      b[i] = unif(re);
+  }
+  if (s == 0) {
+    c = new double[nlc];
+    for (long j = 0; j < nlc; j++)
+      c[j] = unif(re);
   }
 
   if (s == 0 && t == 0)
@@ -329,7 +355,7 @@ void simplex_test() {
   bsp_sync();
   double time0 = bsp_time();
 
-  // simplex(M, N, s, t, m, n, T);
+  simplex(M, N, s, t, m, n, A, c, b);
   bsp_sync();
   double time1 = bsp_time();
 
@@ -337,7 +363,9 @@ void simplex_test() {
     printf("End of Linear Optimization\n");
     printf("This took only %.6lf seconds.\n", time1 - time0);
   }
-  matfreed(T);
+  matfreed(A);
+  delete[] b;
+  delete[] c;
 
   bsp_end();
 }
@@ -470,7 +498,7 @@ void easy_test_two_rows() {
 }
 
 int main(int argc, char **argv) {
-  bsp_init(easy_test_two_cols, argc, argv);
+  bsp_init(simplex_test, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -482,6 +510,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  easy_test_two_cols();
+  simplex_test();
   exit(EXIT_SUCCESS);
 }
