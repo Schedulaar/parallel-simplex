@@ -6,6 +6,7 @@
 
 long M, N;
 double EPS = 1e-20;
+enum STATUS { RUNNING, SUCCESS, UNBOUNDED };
 
 double **matallocd(size_t m, size_t n) {
   /* This function allocates an m x n matrix of doubles */
@@ -83,6 +84,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   double *alj = new double[nloc(n, t, n)];
   double bl;
   double ce;
+  int status = RUNNING;
 
   bsp_push_reg(aie, nloc(M, s, m) * sizeof(double));
   bsp_push_reg(alj, nloc(N, t, n) * sizeof(double));
@@ -92,6 +94,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   bsp_push_reg(&e, sizeof(long));
   bsp_push_reg(&l, sizeof(long));
   bsp_push_reg(&bl, sizeof(double));
+  bsp_push_reg(&status, sizeof(int));
   if (s == 0) {
     cLocalMaxima = new double[N];
     cLocalMaximaIndices = new long[N];
@@ -100,137 +103,159 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
     bsp_push_reg(&ce, sizeof(double));
   }
   bsp_sync();
-  print_tableau(M, N, s, t, m, n, A, c, b, v);
+  while(true) {
+    print_tableau(M, N, s, t, m, n, A, c, b, v);
 
-  // Find some e maximizing c[e]
-  e = 0; // global column index
-  if (s == 0) {
-    cLocalMaxima[t] = c[0];
-    cLocalMaximaIndices[t] = t;
-    for (long j = 1; j < nloc(N, t, n); j++) {
-      if (c[j] > cLocalMaxima[t]) {
-        cLocalMaximaIndices[t] = t + N * j;
-        cLocalMaxima[t] = c[j];
-      }
-    }
-    // Broadcast local maximum
-    for (long k = 0; k < N; k++) {
-      bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(double), sizeof(double));
-      bsp_put(0 * N + k, &cLocalMaximaIndices[t], cLocalMaximaIndices, t * sizeof(long), sizeof(long));
-    }
-    bsp_sync();
-
-    long globalMaximumProc = 0;
-    for (long k = 1; k < N; k++) {
-      if (cLocalMaxima[globalMaximumProc] < cLocalMaxima[k])
-        globalMaximumProc = k;
-    }
-    e = cLocalMaximaIndices[globalMaximumProc];
-
-    // Broadcast e to rest of the column
-    for (long k = 0; k < M; k++)
-      bsp_put(0 * N + k, &e, &e, 0, sizeof(long));
-    bsp_sync();
-  } else {
-    bsp_sync();
-    bsp_sync();
-  }
-
-  // Find l with a_el > 0 minimizing b_l / a_el
-  // Do so by first distributing $b_i$ to $a_il$
-  if (e % N == t) {
-    bsp_get(s * N + 0, b, 0, b, nloc(M, s, m) * sizeof(double));
-    bsp_sync();
-
-    // Now find maximum
-    baLocalMinima[s] = 0;
-    baLocalMinimaIndices[s] = -1;
-    for (long i = 1; i < nloc(M, s, m); i++) {
-      if (A[i][e / N] > EPS) {
-        double ba = b[i] / A[i][e / N];
-        if (ba < baLocalMinima[s] || baLocalMinimaIndices[s] == -1) {
-          baLocalMinima[s] = ba;
-          baLocalMinimaIndices[s] = s + M * i;
+    // Find some e maximizing c[e]
+    e = 0; // global column index
+    if (s == 0) {
+      cLocalMaxima[t] = c[0];
+      cLocalMaximaIndices[t] = t;
+      for (long j = 1; j < nloc(N, t, n); j++) {
+        if (c[j] > cLocalMaxima[t]) {
+          cLocalMaximaIndices[t] = t + N * j;
+          cLocalMaxima[t] = c[j];
         }
       }
-    }
-    // Distribute to the rest of column
-    for (long k = 0; k < M; k++) {
-      bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(double), sizeof(double));
-      bsp_put(k * N + t, &baLocalMinimaIndices[s], baLocalMinima, s * sizeof(double), sizeof(double));
-    }
-    bsp_sync();
+      // Broadcast local maximum
+      for (long k = 0; k < N; k++) {
+        bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(double), sizeof(double));
+        bsp_put(0 * N + k, &cLocalMaximaIndices[t], cLocalMaximaIndices, t * sizeof(long), sizeof(long));
+      }
+      bsp_sync();
 
-    long globalMaximumProc = 0;
-    for (long k = 1; k < N; k++) {
-      if (baLocalMinima[globalMaximumProc] < baLocalMinima[k])
-        globalMaximumProc = k;
-    }
-    if (baLocalMinima[globalMaximumProc] <= EPS)
-      bsp_abort("Problem unbounded!");
-    l = baLocalMinimaIndices[globalMaximumProc];
+      long globalMaximumProc = 0;
+      for (long k = 1; k < N; k++) {
+        if (cLocalMaxima[globalMaximumProc] < cLocalMaxima[k])
+          globalMaximumProc = k;
+      }
+      e = cLocalMaximaIndices[globalMaximumProc];
 
-    // Now share l, A_ie and c_e with the rest of the row
-    for (long k = 0; k < N; k++) {
-      bsp_put(s * N + k, &l, &l, 0, sizeof(long));
-      if (s == 0)
-        bsp_put(0 * N + k, &c[e / N], &ce, 0, sizeof(double));
-      for (long i = 0; i < nloc(M, s, m); i++)
-        bsp_put(s * N + k, &A[i][e / N], aie, i * sizeof(double), sizeof(double));
-    }
-    bsp_sync();
-  } else {
-    bsp_sync();
-    bsp_sync();
-    bsp_sync();
-  }
+      if (cLocalMaxima[globalMaximumProc] <= EPS) {
+        if (t == 0) {
+          status = SUCCESS;
+          printf("Found an optimal solution!\n");
+          for (long k = 0; k < M * N; k++)
+            bsp_put(k, &status, &status, 0, sizeof(STATUS));
+        }
+        bsp_sync();
+        break;
+      }
 
-  // Compute row l
-  if (l % M == s) { // Then processor handles row l
-    long i = l / M;
-    for (long j = 0; j < nloc(N, t, n); j++) {
-      if (e == t + j / N)
-        A[i][j] = 1 / aie[i];
-      else
-        A[i][j] /= aie[i];
-    }
-    if (s == 0)
-      b[i] /= aie[i];
-
-    // Distribute row to the rest of the column
-    for (long k = 0; k < M; k++)
-      bsp_put(k * N + t, A[i], alj, 0, nloc(N, t, n) * sizeof(double));
-    if (t == 0) {
+      // Broadcast e to rest of the column
       for (long k = 0; k < M; k++)
-        bsp_put(k * N + t, &b[i], &bl, 0, sizeof(double));
+        bsp_put(0 * N + k, &e, &e, 0, sizeof(long));
+      bsp_sync();
+    } else {
+      bsp_sync();
+      bsp_sync();
+      if (status == SUCCESS) break;
     }
-  }
-  bsp_sync();
 
-  // Compute rest of the constraints
-  // Compute the coefficients of the remaining constraints.
-  for (long i = 0; i < nloc(M, s, m); i++) {
-    if (l % M == s && i == l / M) continue;
-    if (t == 0)
-      b[i] -= aie[i] * bl;
-    for (long j = 0; j < nloc(N, t, n); j++) {
-      if (e % N == t && j == e / N)
-        A[i][j] = -A[i][j] * alj[j];
-      else
-        A[i][j] -= aie[i] * alj[j];
+    // Find l with a_el > 0 minimizing b_l / a_el
+    // Do so by first distributing $b_i$ to $a_il$
+    if (e % N == t) {
+      bsp_get(s * N + 0, b, 0, b, nloc(M, s, m) * sizeof(double));
+      bsp_sync();
+
+      // Now find maximum
+      baLocalMinima[s] = 0;
+      baLocalMinimaIndices[s] = -1;
+      for (long i = 1; i < nloc(M, s, m); i++) {
+        if (A[i][e / N] > EPS) {
+          double ba = b[i] / A[i][e / N];
+          if (ba < baLocalMinima[s] || baLocalMinimaIndices[s] == -1) {
+            baLocalMinima[s] = ba;
+            baLocalMinimaIndices[s] = s + M * i;
+          }
+        }
+      }
+      // Distribute to the rest of column
+      for (long k = 0; k < M; k++) {
+        bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(double), sizeof(double));
+        bsp_put(k * N + t, &baLocalMinimaIndices[s], baLocalMinima, s * sizeof(double), sizeof(double));
+      }
+      bsp_sync();
+
+      long globalMaximumProc = 0;
+      for (long k = 1; k < N; k++) {
+        if (baLocalMinima[globalMaximumProc] < baLocalMinima[k])
+          globalMaximumProc = k;
+      }
+      if (baLocalMinima[globalMaximumProc] <= EPS) {
+        if (s == 0) {
+          printf("Problem unbounded!");
+          status = UNBOUNDED;
+          for (long k = 0; k < N*M; k++)
+            bsp_put(k, &status, &status, 0, sizeof(STATUS));
+        }
+        bsp_sync();
+        break;
+      }
+      l = baLocalMinimaIndices[globalMaximumProc];
+
+      // Now share l, A_ie and c_e with the rest of the row
+      for (long k = 0; k < N; k++) {
+        bsp_put(s * N + k, &l, &l, 0, sizeof(long));
+        if (s == 0)
+          bsp_put(0 * N + k, &c[e / N], &ce, 0, sizeof(double));
+        for (long i = 0; i < nloc(M, s, m); i++)
+          bsp_put(s * N + k, &A[i][e / N], aie, i * sizeof(double), sizeof(double));
+      }
+      bsp_sync();
+    } else {
+      bsp_sync();
+      bsp_sync();
+      bsp_sync();
+      if (status == UNBOUNDED) break;
+    }
+
+    // Compute row l
+    if (l % M == s) { // Then processor handles row l
+      long i = l / M;
+      for (long j = 0; j < nloc(N, t, n); j++) {
+        if (e == t + j / N)
+          A[i][j] = 1 / aie[i];
+        else
+          A[i][j] /= aie[i];
+      }
+      if (s == 0)
+        b[i] /= aie[i];
+
+      // Distribute row to the rest of the column
+      for (long k = 0; k < M; k++)
+        bsp_put(k * N + t, A[i], alj, 0, nloc(N, t, n) * sizeof(double));
+      if (t == 0) {
+        for (long k = 0; k < M; k++)
+          bsp_put(k * N + t, &b[i], &bl, 0, sizeof(double));
+      }
+    }
+    bsp_sync();
+
+    // Compute rest of the constraints
+    // Compute the coefficients of the remaining constraints.
+    for (long i = 0; i < nloc(M, s, m); i++) {
+      if (l % M == s && i == l / M) continue;
+      if (t == 0)
+        b[i] -= aie[i] * bl;
+      for (long j = 0; j < nloc(N, t, n); j++) {
+        if (e % N == t && j == e / N)
+          A[i][j] = -A[i][j] * alj[j];
+        else
+          A[i][j] -= aie[i] * alj[j];
+      }
+    }
+    if (s == 0) {
+      for (long j = 0; j < nloc(N, t, n); j++) {
+        if (e % N == t && j == e / N)
+          c[j] = -ce * alj[j];
+        else
+          c[j] -= ce * alj[j];
+      }
+      if (t == 0)
+        v += ce * bl;
     }
   }
-  if (s == 0) {
-    for (long j = 0; j < nloc(N, t, n); j++) {
-      if (e % N == t && j == e / N)
-        c[j] = -ce * alj[j];
-      else
-        c[j] -= ce * alj[j];
-    }
-    if (t == 0)
-      v += ce * bl;
-  }
-  print_tableau(M, N, s, t, m, n, A, c, b, v);
 }
 
 
@@ -393,7 +418,7 @@ void easy_test_two_procs(){
 }
 
 int main(int argc, char **argv) {
-  bsp_init(easy_test_two_procs, argc, argv);
+  bsp_init(easy_test_one_proc, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -405,6 +430,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  easy_test_two_procs();
+  easy_test_one_proc();
   exit(EXIT_SUCCESS);
 }
