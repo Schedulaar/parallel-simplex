@@ -44,7 +44,7 @@ void matfreed(double **ppd) {
   }
 }
 
-void print_tableau(long M, long N, long s, long t, long m, long n, double ** A, double * c, double * b, double v) {
+void print_tableau(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b, double v) {
   if (s == 0 && t == 0) {
     printf("--------------------\n");
     printf("z  = %+.2f", v);
@@ -52,7 +52,7 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double ** A, 
   bsp_sync();
   for (int j = 0; j < n; j++) {
     if (j % N == t && s == 0)
-      printf(" %+.2f*x?", c[j/N]);
+      printf(" %+.2f*x?", c[j / N]);
     bsp_sync();
   }
   if (s == 0 && t == 0)
@@ -60,11 +60,11 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double ** A, 
   bsp_sync();
   for (int i = 0; i < m; i++) {
     if (i % M == s && t == 0)
-      printf("x? = %+.2f", b[i/M]);
+      printf("x? = %+.2f", b[i / M]);
     bsp_sync();
     for (int j = 0; j < n; j++) {
       if (i % M == s && j % N == t)
-        printf(" %+.2f*x?", -A[i/M][j/N]);
+        printf(" %+.2f*x?", -A[i / M][j / N]);
       bsp_sync();
     }
     if (s == 0 && t == 0)
@@ -76,8 +76,8 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   double v = 0;
   double *cLocalMaxima;
   long *cLocalMaximaIndices;
-  double *baLocalMinima = new double[nloc(M, s, m)];
-  long *baLocalMinimaIndices = new long[nloc(M, s, m)];;
+  double *baLocalMinima = new double[M];
+  long *baLocalMinimaIndices = new long[M];;
   long e = -1; // Entering index
   long l = -1; // Leaving index
   double *aie = new double[nloc(M, s, m)];
@@ -103,7 +103,8 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
     bsp_push_reg(&ce, sizeof(double));
   }
   bsp_sync();
-  while(true) {
+
+  while (true) {
     print_tableau(M, N, s, t, m, n, A, c, b, v);
 
     // Find some e maximizing c[e]
@@ -159,40 +160,43 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
       bsp_sync();
 
       // Now find maximum
-      baLocalMinima[s] = 0;
+      baLocalMinima[s] = -1;
       baLocalMinimaIndices[s] = -1;
-      for (long i = 1; i < nloc(M, s, m); i++) {
+      for (long i = 0; i < nloc(M, s, m); i++) {
         if (A[i][e / N] > EPS) {
           double ba = b[i] / A[i][e / N];
           if (ba < baLocalMinima[s] || baLocalMinimaIndices[s] == -1) {
             baLocalMinima[s] = ba;
-            baLocalMinimaIndices[s] = s + M * i;
+            baLocalMinimaIndices[s] = M * i + s;
           }
         }
       }
+
       // Distribute to the rest of column
       for (long k = 0; k < M; k++) {
         bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(double), sizeof(double));
-        bsp_put(k * N + t, &baLocalMinimaIndices[s], baLocalMinima, s * sizeof(double), sizeof(double));
+        bsp_put(k * N + t, &baLocalMinimaIndices[s], baLocalMinimaIndices, s * sizeof(long), sizeof(long));
       }
       bsp_sync();
 
-      long globalMaximumProc = 0;
-      for (long k = 1; k < N; k++) {
-        if (baLocalMinima[globalMaximumProc] < baLocalMinima[k])
-          globalMaximumProc = k;
+      long globalMinimumProc = -1;
+      for (long k = 0; k < M; k++) {
+        if (baLocalMinimaIndices[k] != -1 &&
+            (globalMinimumProc == -1 || baLocalMinima[k] < baLocalMinima[globalMinimumProc]))
+          globalMinimumProc = k;
       }
-      if (baLocalMinima[globalMaximumProc] <= EPS) {
+      if (globalMinimumProc == -1) {
         if (s == 0) {
-          printf("Problem unbounded!");
+          printf("Problem unbounded!\n");
           status = UNBOUNDED;
-          for (long k = 0; k < N*M; k++)
+          for (long k = 0; k < N * M; k++)
             bsp_put(k, &status, &status, 0, sizeof(STATUS));
         }
         bsp_sync();
         break;
       }
-      l = baLocalMinimaIndices[globalMaximumProc];
+      l = baLocalMinimaIndices[globalMinimumProc];
+      if (s == 0) printf("%li enters; %li leaves.\n", e, l);
 
       // Now share l, A_ie and c_e with the rest of the row
       for (long k = 0; k < N; k++) {
@@ -219,7 +223,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
         else
           A[i][j] /= aie[i];
       }
-      if (s == 0)
+      if (t == 0)
         b[i] /= aie[i];
 
       // Distribute row to the rest of the column
@@ -338,7 +342,7 @@ void simplex_test() {
   bsp_end();
 }
 
-void easy_test_one_proc(){
+void easy_test_one_proc() {
   bsp_begin(1);
   long p = 1; /* p=M*N */
   long pid = bsp_pid();
@@ -353,7 +357,7 @@ void easy_test_one_proc(){
           2, 2, 5,
           4, 1, 2
   };
-  double * A[] = {
+  double *A[] = {
           &dA[0],
           &dA[3],
           &dA[6]
@@ -371,7 +375,7 @@ void easy_test_one_proc(){
   bsp_end();
 }
 
-void easy_test_two_procs(){
+void easy_test_two_procs() {
   bsp_begin(2);
   long p = 2;
   long pid = bsp_pid();
@@ -387,7 +391,7 @@ void easy_test_two_procs(){
             1, 1, 3,
             4, 1, 2
     };
-    double * A[] = {
+    double *A[] = {
             &dA[0],
             &dA[3]
     };
@@ -402,7 +406,7 @@ void easy_test_two_procs(){
     double dA[] = {
             2, 2, 5
     };
-    double * A[] = {
+    double *A[] = {
             &dA[0]
     };
     double b[] = {
@@ -412,13 +416,11 @@ void easy_test_two_procs(){
     double v = 0;
     simplex(M, N, s, t, m, n, A, c, b);
   }
-
-
   bsp_end();
 }
 
 int main(int argc, char **argv) {
-  bsp_init(easy_test_one_proc, argc, argv);
+  bsp_init(easy_test_two_procs, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -430,6 +432,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  easy_test_one_proc();
+  easy_test_two_procs();
   exit(EXIT_SUCCESS);
 }
