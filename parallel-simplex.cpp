@@ -218,7 +218,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
     if (l % M == s) { // Then processor handles row l
       long i = l / M;
       for (long j = 0; j < nloc(N, t, n); j++) {
-        if (e == t + j / N)
+        if (e % N == t && j == e / N)
           A[i][j] = 1 / aie[i];
         else
           A[i][j] /= aie[i];
@@ -375,7 +375,57 @@ void easy_test_one_proc() {
   bsp_end();
 }
 
-void easy_test_two_procs() {
+void easy_test_two_cols() {
+  bsp_begin(2);
+  long p = 2;
+  long pid = bsp_pid();
+
+  long s = pid % M;
+  long t = pid / M;
+
+  int n = 3;
+  int m = 3;
+
+  if (t == 0) {
+    double dA[] = {
+            1, 3,
+            2, 5,
+            4, 2
+    };
+    double *A[] = {
+            &dA[0],
+            &dA[2],
+            &dA[4]
+    };
+    double b[] = {
+            30,
+            24,
+            36
+    };
+    double c[] = {3, 2};
+    double v = 0;
+
+    simplex(M, N, s, t, m, n, A, c, b);
+  } else {
+    double dA[] = {
+            1,
+            2,
+            1
+    };
+    double *A[] = {
+            &dA[0],
+            &dA[1],
+            &dA[2]
+    };
+    double * b;
+    double c[] = { 1 };
+    double v = 0;
+    simplex(M, N, s, t, m, n, A, c, b);
+  }
+  bsp_end();
+}
+
+void easy_test_two_rows() {
   bsp_begin(2);
   long p = 2;
   long pid = bsp_pid();
@@ -420,7 +470,7 @@ void easy_test_two_procs() {
 }
 
 int main(int argc, char **argv) {
-  bsp_init(easy_test_two_procs, argc, argv);
+  bsp_init(easy_test_two_cols, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -432,6 +482,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  easy_test_two_procs();
+  easy_test_two_cols();
   exit(EXIT_SUCCESS);
 }
