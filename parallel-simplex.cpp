@@ -59,7 +59,7 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double ** A, 
   bsp_sync();
   for (int i = 0; i < m; i++) {
     if (i % M == s && t == 0)
-      printf("x? = %+.2f", b[i]);
+      printf("x? = %+.2f", b[i/M]);
     bsp_sync();
     for (int j = 0; j < n; j++) {
       if (i % M == s && j % N == t)
@@ -91,15 +91,13 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   bsp_push_reg(baLocalMinimaIndices, M * sizeof(long));
   bsp_push_reg(&e, sizeof(long));
   bsp_push_reg(&l, sizeof(long));
+  bsp_push_reg(&bl, sizeof(double));
   if (s == 0) {
     cLocalMaxima = new double[N];
     cLocalMaximaIndices = new long[N];
     bsp_push_reg(cLocalMaxima, N * sizeof(double));
     bsp_push_reg(cLocalMaximaIndices, N * sizeof(long)); // global indices of local maxima
     bsp_push_reg(&ce, sizeof(double));
-  }
-  if (t == 0) {
-    bsp_push_reg(&bl, sizeof(double));
   }
   bsp_sync();
   print_tableau(M, N, s, t, m, n, A, c, b, v);
@@ -315,10 +313,13 @@ void simplex_test() {
   bsp_end();
 }
 
-void easy_test(){
+void easy_test_one_proc(){
   bsp_begin(1);
   long p = 1; /* p=M*N */
   long pid = bsp_pid();
+
+  long s = pid % M;
+  long t = pid / M;
 
   int n = 3;
   int m = 3;
@@ -327,10 +328,11 @@ void easy_test(){
           2, 2, 5,
           4, 1, 2
   };
-  double ** A = new double*[3];
-  A[0] = &dA[0];
-  A[1] = &dA[3];
-  A[2] = &dA[6];
+  double * A[] = {
+          &dA[0],
+          &dA[3],
+          &dA[6]
+  };
   double b[] = {
           30,
           24,
@@ -339,19 +341,59 @@ void easy_test(){
   double c[] = {3, 1, 2};
   double v = 0;
 
-  long s = pid % M;
-  long t = pid / M;
-
-  long nlr = nloc(M + 1, s, n); /* number of local rows */
-  long nlc = nloc(N + 1, t, n); /* number of local columns */
-
   simplex(M, N, s, t, m, n, A, c, b);
 
   bsp_end();
 }
 
+void easy_test_two_procs(){
+  bsp_begin(2);
+  long p = 2;
+  long pid = bsp_pid();
+
+  long s = pid % M;
+  long t = pid / M;
+
+  int n = 3;
+  int m = 3;
+
+  if (s == 0) {
+    double dA[] = {
+            1, 1, 3,
+            4, 1, 2
+    };
+    double * A[] = {
+            &dA[0],
+            &dA[3]
+    };
+    double b[] = {
+            30,
+            36
+    };
+    double c[] = {3, 1, 2};
+    double v = 0;
+    simplex(M, N, s, t, m, n, A, c, b);
+  } else {
+    double dA[] = {
+            2, 2, 5
+    };
+    double * A[] = {
+            &dA[0]
+    };
+    double b[] = {
+            24
+    };
+    double *c;
+    double v = 0;
+    simplex(M, N, s, t, m, n, A, c, b);
+  }
+
+
+  bsp_end();
+}
+
 int main(int argc, char **argv) {
-  bsp_init(easy_test, argc, argv);
+  bsp_init(easy_test_two_procs, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -363,6 +405,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  easy_test();
+  easy_test_two_procs();
   exit(EXIT_SUCCESS);
 }
