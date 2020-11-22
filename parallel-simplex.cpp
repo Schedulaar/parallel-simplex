@@ -5,7 +5,6 @@
 #include <random>
 
 long M, N;
-double EPS = 1e-20;
 enum STATUS { RUNNING, SUCCESS, UNBOUNDED };
 bool PRINT_TABLES = true;
 
@@ -86,6 +85,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   double bl;
   double ce;
   int status = RUNNING;
+  double EPS = 1e-20;
 
   bsp_push_reg(aie, nloc(M, s, m) * sizeof(double));
   bsp_push_reg(alj, nloc(N, t, n) * sizeof(double));
@@ -96,13 +96,11 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   bsp_push_reg(&l, sizeof(long));
   bsp_push_reg(&bl, sizeof(double));
   bsp_push_reg(&status, sizeof(int));
-  if (s == 0) {
-    cLocalMaxima = new double[N];
-    cLocalMaximaIndices = new long[N];
-    bsp_push_reg(cLocalMaxima, N * sizeof(double));
-    bsp_push_reg(cLocalMaximaIndices, N * sizeof(long)); // global indices of local maxima
-    bsp_push_reg(&ce, sizeof(double));
-  }
+  cLocalMaxima = new double[N];
+  cLocalMaximaIndices = new long[N];
+  bsp_push_reg(cLocalMaxima, N * sizeof(double));
+  bsp_push_reg(cLocalMaximaIndices, N * sizeof(long)); // global indices of local maxima
+  bsp_push_reg(&ce, sizeof(double));
   bsp_sync();
 
   while (true) {
@@ -134,6 +132,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
       }
       e = cLocalMaximaIndices[globalMaximumProc];
 
+
       if (cLocalMaxima[globalMaximumProc] <= EPS) {
         if (t == 0) {
           status = SUCCESS;
@@ -147,7 +146,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
 
       // Broadcast e to rest of the column
       for (long k = 0; k < M; k++)
-        bsp_put(0 * N + k, &e, &e, 0, sizeof(long));
+        bsp_put(k * N + t, &e, &e, 0, sizeof(long));
       bsp_sync();
     } else {
       bsp_sync();
@@ -319,14 +318,14 @@ void simplex_test() {
   bsp_pop_reg(&M);
 
   /* Compute 2D processor numbering from 1D numbering */
-  long s = pid % M;  /* 0 <= s < M */
-  long t = pid / M;  /* 0 <= t < N */
+  long s = pid / N;  /* 0 <= s < M */
+  long t = pid % N;  /* 0 <= t < N */
 
-  long nlr = nloc(M, s, n); /* number of local rows */
+  long nlr = nloc(M, s, m); /* number of local rows */
   long nlc = nloc(N, t, n); /* number of local columns */
   double **A = matallocd(nlr, nlc);
-  double *b;
-  double *c;
+  double *b = new double[nlr];
+  double *c = new double[nlc];;
 
   if (s == 0 && t == 0) {
     printf("Linear Optimization of %ld by %ld matrix\n", n, n);
@@ -340,12 +339,10 @@ void simplex_test() {
       A[i][j] = unif(re); // random variable between 0 and 1
   }
   if (t == 0) {
-    b = new double[nlr];
     for (long i = 0; i < nlr; i++)
       b[i] = unif(re);
   }
   if (s == 0) {
-    c = new double[nlc];
     for (long j = 0; j < nlc; j++)
       c[j] = unif(re);
   }
