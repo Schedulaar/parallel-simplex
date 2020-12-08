@@ -3,6 +3,10 @@
 #include <string>
 #include <bsp.hpp>
 #include <random>
+#include <iostream>
+#include <fstream>
+#include <string>
+
 
 long M, N;
 enum STATUS { RUNNING, SUCCESS, UNBOUNDED };
@@ -494,8 +498,143 @@ void easy_test_two_rows() {
   bsp_end();
 }
 
+void simplex_from_file() {
+  PRINT_TABLES = false;
+  bsp_begin(M * N);
+  long p = bsp_nprocs(); /* p=M*N */
+  long pid = bsp_pid();
+
+  bsp_push_reg(&M, sizeof(long));
+  bsp_push_reg(&N, sizeof(long));
+  long m; /* matrix size */
+  long n; /* matrix size */
+  bsp_push_reg(&m, sizeof(long));
+  bsp_push_reg(&n, sizeof(long));
+  bsp_sync();
+
+  if (pid == 0) {
+    printf("Please enter matrix size n (nxn):\n");
+    scanf("%ld", &n);
+    m = n;
+    if (n != 10 && n != 100 && n != 1000 && n != 10000 && n != 1000000)
+      bsp_abort("Matrix not available.");
+    for (long q = 0; q < p; q++) {
+      bsp_put(q, &M, &M, 0, sizeof(long));
+      bsp_put(q, &N, &N, 0, sizeof(long));
+      bsp_put(q, &m, &m, 0, sizeof(long));
+      bsp_put(q, &n, &n, 0, sizeof(long));
+    }
+  }
+  bsp_sync();
+  bsp_pop_reg(&m); /* not needed anymore */
+  bsp_pop_reg(&n);
+  bsp_pop_reg(&N);
+  bsp_pop_reg(&M);
+
+  /* Compute 2D processor numbering from 1D numbering */
+  long s = pid / N;  /* 0 <= s < M */
+  long t = pid % N;  /* 0 <= t < N */
+
+  long nlr = nloc(M, s, m); /* number of local rows */
+  long nlc = nloc(N, t, n); /* number of local columns */
+  double **A = matallocd(nlr, nlc);
+  double *b = new double[nlr];
+  double *c = new double[nlc];
+  bsp_push_reg(A[0], nlr*nlc*sizeof(double));
+  bsp_push_reg(b, nlr*nlc*sizeof(double));
+  bsp_push_reg(c, nlr*nlc*sizeof(double));
+  bsp_sync();
+
+  if (s == 0 && t == 0) {
+    printf("Linear Optimization of %ld by %ld matrix\n", n, m);
+    printf("using the %ld by %ld cyclic distribution\n", M, N);
+    printf("Now reading the problem...\n");
+
+
+    long maxLRows = ceil(((double)m)/M);
+    long maxLCols = ceil(((double)n)/N);
+
+    double ** gA = matallocd(M*N,maxLRows * maxLCols);
+    std::ifstream fileA;
+    fileA.open(std::to_string(n) + "-A.csv");
+    if (!fileA) bsp_abort(("Could not open file: " + std::to_string(n) + "-A.csv").c_str());
+    for (long i = 0; i < m; i++) {
+      std::string cell;
+      for (long j = 0; j < n; j++) {
+        if(!std::getline(fileA, cell, ',')) bsp_abort("Couldn't read A");
+        gA[(i%M) * N + j%N][i/M * nloc(N,j%N,n) + j/N] = std::stod(cell);
+      }
+    }
+    fileA.close();
+
+    double ** gb = matallocd(M, maxLRows);
+    std::ifstream fileb;
+    fileb.open(std::to_string(n) + "-b.csv");
+    if (!fileb) bsp_abort(("Could not open file: " + std::to_string(n) + "-b.csv").c_str());
+    for (long i = 0; i < m; i++) {
+      std::string cell;
+      if(!std::getline(fileb, cell)) bsp_abort("Couldn't read b");
+      gb[i % M][i / M] = std::stod(cell);
+    }
+    fileb.close();
+
+
+    double ** gc = matallocd(N, maxLCols);
+    std::ifstream filec (std::to_string(n) + "-c.csv");
+    for (long j = 0; j < n; j++) {
+      std::string cell;
+      std::getline(filec, cell);
+      gc[j % N][j / N] = std::stod(cell);
+    }
+    filec.close();
+
+    for (long i = 0; i < M; i++) {
+      for (long j = 0; j < N; j++) {
+        bsp_put(i*N + j, gA[i*N + j], A[0], 0, nloc(M, i, m)*nloc(N,j,n) * sizeof(double));
+      }
+      bsp_put(i*N + 0, gb[i], b, 0, nloc(M,i,m)*sizeof(double));
+    }
+    for (long j = 0; j < N; j++) {
+      bsp_put(0*N + j, gc[j], c, 0, nloc(N,j,n)*sizeof(double));
+    }
+
+    bsp_sync();
+
+    matfreed(gA);
+    matfreed(gb);
+    matfreed(gc);
+  } else {
+    bsp_sync();
+  }
+
+  bsp_pop_reg(A[0]);
+  bsp_pop_reg(b);
+  bsp_pop_reg(c);
+  bsp_sync();
+
+  if (s == 0 && t == 0)
+    printf("Start of Linear Optimization\n");
+  bsp_sync();
+  double time0 = bsp_time();
+
+  simplex(M, N, s, t, m, n, A, c, b);
+  bsp_sync();
+  double time1 = bsp_time();
+
+  if (s == 0 && t == 0) {
+    printf("End of Linear Optimization\n");
+    printf("This took only %.6lf seconds.\n", time1 - time0);
+  }
+  matfreed(A);
+  delete[] b;
+  delete[] c;
+
+  bsp_end();
+}
+
+
 int main(int argc, char **argv) {
-  bsp_init(simplex_test, argc, argv);
+  bsp_init(simplex_from_file, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -507,6 +646,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  simplex_test();
+  simplex_from_file();
   exit(EXIT_SUCCESS);
 }
