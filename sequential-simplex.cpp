@@ -83,10 +83,10 @@ std::string simplex_slack(
 ) {
 
   print_slack(N, B, A, b, c, v, n, m);
-  int e;
-  for (e = 0; e < m; e++)
-    if (c[e] > EPS) break;
-  while (e < m) { // While there exists j with c_j > 0
+  int e = 0;
+  for (int j = 1; j < m; j++)
+    e = c[j]>c[e] ? j : e;
+  while (c[e] > EPS) { // While there exists j with c_j > 0
 
     // Find i in B minimizing b_i / a_ie
     int imin = -1;
@@ -97,13 +97,16 @@ std::string simplex_slack(
     }
     if (imin == -1) return "unbounded";
 
+    printf("x%i enters; x%i leaves.\n", N[e], B[imin]);
+
     pivot(N, B, A, b, c, v, imin, e, n, m, // inputs
           N, B, A, b, c, v);            // outputs
 
     print_slack(N, B, A, b, c, v, n, m);
 
-    for (e = 0; e < m; e++)
-      if (c[e] > EPS) break;
+    e = 0;
+    for (int j = 1; j < m; j++)
+      e = c[j]>c[e] ? j : e;
   }
 
   for (int j = 0; j < m; j++)
