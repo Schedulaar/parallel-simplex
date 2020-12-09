@@ -43,9 +43,9 @@ void bsp_broadcast(double *x, long n, long src, long s0, long s, long stride, lo
       long t1 = (phase == 0 ? t : (s - s0) / stride);
       // in phase 1: s= s0+t1*stride
 
-      auto nbytes = min(b, n - t1 * b) * sizeof(double);
+      long nbytes = min(b, n - t1 * b);
       if (nbytes > 0 && dest != src)
-        bsp_put(dest, &x[t1 * b], x, t1 * b * sizeof(double), nbytes);
+        bsp_put(dest, &x[t1 * b], x, t1 * b * sizeof(double), min(b, n - t1 * b) * sizeof(double));
     }
   }
 }
