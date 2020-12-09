@@ -82,7 +82,7 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
   }
 }
 
-void simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
+double simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
              long * Basis, long * NonBasis) {
   double v = 0;
   double *cLocalMaxima;
@@ -303,6 +303,8 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   delete [] baLocalMinimaIndices;
   delete [] alj;
   delete [] aie;
+
+  return v;
 }
 
 
@@ -525,7 +527,7 @@ void easy_test_two_rows() {
 }
 
 void simplex_from_file() {
-  PRINT_TABLES = true;
+  PRINT_TABLES = false;
   bsp_begin(M * N);
   long p = bsp_nprocs(); /* p=M*N */
   long pid = bsp_pid();
@@ -645,12 +647,12 @@ void simplex_from_file() {
   bsp_sync();
   double time0 = bsp_time();
 
-  simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
+  double z = simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   bsp_sync();
   double time1 = bsp_time();
 
   if (s == 0 && t == 0) {
-    printf("End of Linear Optimization\n");
+    printf("End of Linear Optimization: Optimal value: %lf\n", z);
     printf("This took only %.6lf seconds.\n", time1 - time0);
   }
   matfreed(A);

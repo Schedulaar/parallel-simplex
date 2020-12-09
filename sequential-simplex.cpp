@@ -5,7 +5,7 @@
 #include <fstream>
 #include <chrono>
 
-bool PRINT = true;
+bool PRINT = false;
 
 int index(int i, int j, int rowLength) {
   return i * rowLength + j;
@@ -277,7 +277,7 @@ void test() {
   std::string result = simplex_slack(N, B, A, b, c, v, n, m,
                                      x, z);
   if (result == "success") {
-    printf("Found optimal solution with object value %lf:\n", z);
+    printf("Found optimal solution with objective value %lf:\n", z);
     for (int k = 0; k < n + m; k++) {
       printf("x%i=%lf,\n", k, x[k]);
     }
@@ -305,7 +305,6 @@ void testPhase1() {
 }
 
 void testFromFile() {
-  PRINT = true;
   long n;
   printf("Choose matrix size nxn!\n");
   scanf("%li", &n);
@@ -353,7 +352,7 @@ void testFromFile() {
   simplex(A, b, c, n, m, x, z);
 
   auto finish = std::chrono::high_resolution_clock::now();
-  printf("Finished Linear Optimization...\n");
+  printf("Finished Linear Optimization with optimal value %lf\n", z);
   std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count() << "ns\n";
 
   delete[] x;
