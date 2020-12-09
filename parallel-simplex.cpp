@@ -267,7 +267,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       l = baLocalMinimaIndices[globalMinimumProc];
       if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
 
-      // Now share l, A_ie and c_e with the rest of the row
+      // Now share l with the rest of the row
       for (long k = 0; k < N; k++) {
         bsp_put(s * N + k, &l, &l, 0, sizeof(long));
       }
@@ -294,13 +294,17 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         b[i] /= aie[i];
 
       // Distribute row to the rest of the column
-      for (long k = 0; k < M; k++)
-        bsp_put(k * N + t, A[i], alj, 0, nloc(N, t, n) * sizeof(double));
       if (t == 0) {
+        for (long j = 0; j < nloc(N,t,n); j++)
+          alj[j] = A[i][j];
         for (long k = 0; k < M; k++)
           bsp_put(k * N + t, &b[i], &bl, 0, sizeof(double));
       }
     }
+
+    bsp_broadcast(alj, nloc(N, t, n), (l%M)*N + t, 0* N + t, s * N + t, N, M, 0);
+    bsp_sync();
+    bsp_broadcast(alj, nloc(N, t, n), (l%M)*N + t, 0* N + t, s * N + t, N, M, 1);
     bsp_sync();
 
     // Compute rest of the constraints
@@ -716,7 +720,7 @@ void simplex_from_file() {
 
 int main(int argc, char **argv) {
   if (argc >= 3) PRINT_TABLES = true;
-  bsp_init(simplex_from_file, argc, argv);
+  bsp_init(easy_test_two_rows, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -728,6 +732,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  simplex_from_file();
+  easy_test_two_rows();
   exit(EXIT_SUCCESS);
 }
