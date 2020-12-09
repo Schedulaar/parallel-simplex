@@ -268,9 +268,8 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
 
       // Now share l with the rest of the row
-      for (long k = 0; k < N; k++) {
+      for (long k = 0; k < N; k++)
         bsp_put(s * N + k, &l, &l, 0, sizeof(long));
-      }
       bsp_sync();
     } else {
       bsp_sync();
@@ -294,9 +293,9 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         b[i] /= aie[i];
 
       // Distribute row to the rest of the column
+      for (long j = 0; j < nloc(N,t,n); j++)
+        alj[j] = A[i][j];
       if (t == 0) {
-        for (long j = 0; j < nloc(N,t,n); j++)
-          alj[j] = A[i][j];
         for (long k = 0; k < M; k++)
           bsp_put(k * N + t, &b[i], &bl, 0, sizeof(double));
       }
