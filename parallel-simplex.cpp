@@ -124,7 +124,6 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   long iterations = 0;
 
   while (true) {
-    iterations++;
     if (PRINT_TABLES)
       print_tableau(M, N, s, t, m, n, A, c, b, v, Basis, NonBasis);
 
@@ -283,6 +282,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       if (t == 0)
         v += ce * bl;
     }
+    iterations++;
   }
 
   bsp_pop_reg(aie);
