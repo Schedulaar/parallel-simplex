@@ -720,7 +720,7 @@ void simplex_from_file() {
 
 int main(int argc, char **argv) {
   if (argc >= 3) PRINT_TABLES = true;
-  bsp_init(easy_test_two_rows, argc, argv);
+  bsp_init(simplex_from_file, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
   scanf("%ld", &M);
@@ -732,6 +732,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  easy_test_two_rows();
+  simplex_from_file();
   exit(EXIT_SUCCESS);
 }
