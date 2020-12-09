@@ -596,8 +596,6 @@ void simplex_from_file() {
     printf("Please enter matrix size n (nxn):\n");
     scanf("%ld", &n);
     m = n;
-    if (n != 10 && n != 100 && n != 1000 && n != 10000 && n != 1000000)
-      bsp_abort("Matrix not available.");
     for (long q = 0; q < p; q++) {
       bsp_put(q, &M, &M, 0, sizeof(long));
       bsp_put(q, &N, &N, 0, sizeof(long));
