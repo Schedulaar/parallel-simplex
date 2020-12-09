@@ -6,11 +6,49 @@
 #include <iostream>
 #include <fstream>
 
-struct result { double z; long iters; };
+struct result {
+  double z;
+  long iters;
+};
 
 long M, N;
-enum STATUS { RUNNING, SUCCESS, UNBOUNDED };
-bool PRINT_TABLES = true;
+enum STATUS {
+  RUNNING, SUCCESS, UNBOUNDED
+};
+bool PRINT_TABLES = false;
+
+long min(long a, long b) { return a <= b ? a : b; }
+
+void bsp_broadcast(double *x, long n, long src, long s0, long s, long stride, long p0, long phase) {
+  /* Broadcast the vector x of length n from processor src to
+     processors s0+t*stride, 0 <= t < p0. Here n, p0 >= 1.
+     The vector x must have been registered previously.
+     Processors are numbered in 1D fashion.
+
+     phase = phase of two-phase broadcast (0 or 1)
+     Only one phase is performed, without synchronization.
+  */
+
+  if (n < 1 || p0 < 1)
+    return;
+
+  long b = (n % p0 == 0 ? n / p0 : n / p0 + 1); // broadcast block size
+
+  if ((phase == 0 && s == src) ||
+      (phase == 1 && s0 <= s && s < s0 + p0 * stride && (s - s0) % stride == 0)) {
+    /* Participate */
+
+    for (long t = 0; t < p0; t++) {
+      long dest = s0 + t * stride;
+      long t1 = (phase == 0 ? t : (s - s0) / stride);
+      // in phase 1: s= s0+t1*stride
+
+      auto nbytes = min(b, n - t1 * b) * sizeof(double);
+      if (nbytes > 0 && dest != src)
+        bsp_put(dest, &x[t1 * b], x, t1 * b * sizeof(double), nbytes);
+    }
+  }
+}
 
 double **matallocd(size_t m, size_t n) {
   /* This function allocates an m x n matrix of doubles */
@@ -55,7 +93,7 @@ void matfreed(double **ppd) {
 }
 
 void print_tableau(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b, double v,
-                   long * Basis, long * NonBasis) {
+                   long *Basis, long *NonBasis) {
   if (s == 0 && t == 0) {
     printf("--------------------\n");
     printf("z  = %+.2f", v);
@@ -84,7 +122,7 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
 }
 
 result simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
-             long * Basis, long * NonBasis) {
+               long *Basis, long *NonBasis) {
   double v = 0;
   double *cLocalMaxima;
   long *cLocalMaximaIndices;
@@ -102,7 +140,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   for (long j = 0; j < n; j++)
     NonBasis[j] = j;
   for (long i = 0; i < m; i++)
-    Basis[i] = n+i;
+    Basis[i] = n + i;
 
 
   bsp_push_reg(aie, nloc(M, s, m) * sizeof(double));
@@ -175,10 +213,20 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     }
 
     // Find l with a_el > 0 minimizing b_l / a_el
-    // Do so by first distributing $b_i$ to $a_il$
+    // Do so by first distributing b_i to a_il
+    // At the same time, we share column e!
     if (e % N == t) {
       bsp_get(s * N + 0, b, 0, b, nloc(M, s, m) * sizeof(double));
+      // Start two-phase broadcast of column e
+      if (s == 0) {
+        for (long k = 0; k < N; k++)
+          bsp_put(0 * N + k, &c[e / N], &ce, 0, sizeof(double));
+      }
+      for (long i = 0; i < nloc(M, s, m); i++)
+        aie[i] = A[i][e / N];
+      bsp_broadcast(aie, nloc(M, s, m), s * N + (e % N), s * N + 0, s * N + t, 1, N, 0);
       bsp_sync();
+      bsp_broadcast(aie, nloc(M, s, m), s * N + (e % N), s * N + 0, s * N + t, 1, N, 1);
 
       // Now find maximum
       baLocalMinima[s] = -1;
@@ -222,22 +270,18 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       // Now share l, A_ie and c_e with the rest of the row
       for (long k = 0; k < N; k++) {
         bsp_put(s * N + k, &l, &l, 0, sizeof(long));
-        if (s == 0)
-          bsp_put(0 * N + k, &c[e / N], &ce, 0, sizeof(double));
-        for (long i = 0; i < nloc(M, s, m); i++)
-          bsp_put(s * N + k, &A[i][e / N], aie, i * sizeof(double), sizeof(double));
       }
       bsp_sync();
     } else {
       bsp_sync();
+      bsp_broadcast(aie, nloc(M, s, m), s * N + (e % N), s * N + 0, s * N + t, 1, N, 1);
       bsp_sync();
       bsp_sync();
       if (status == UNBOUNDED) break;
     }
     swap(Basis[l], NonBasis[e]);
 
-
-    // Compute row l
+    // Now we compute row l
     if (l % M == s) { // Then processor handles row l
       long i = l / M;
       for (long j = 0; j < nloc(N, t, n); j++) {
@@ -299,24 +343,23 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     bsp_pop_reg(cLocalMaxima);
     bsp_pop_reg(cLocalMaximaIndices);
     bsp_pop_reg(&ce);
-    delete [] cLocalMaxima;
-    delete [] cLocalMaximaIndices;
+    delete[] cLocalMaxima;
+    delete[] cLocalMaximaIndices;
   }
 
-  delete [] baLocalMinima;
-  delete [] baLocalMinimaIndices;
-  delete [] alj;
-  delete [] aie;
+  delete[] baLocalMinima;
+  delete[] baLocalMinimaIndices;
+  delete[] alj;
+  delete[] aie;
 
   return {
-    .z =  v,
-    .iters = iterations
+          .z =  v,
+          .iters = iterations
   };
 }
 
 
 void simplex_test() {
-  PRINT_TABLES = false;
   bsp_begin(M * N);
   long p = bsp_nprocs(); /* p=M*N */
   long pid = bsp_pid();
@@ -354,8 +397,8 @@ void simplex_test() {
   double **A = matallocd(nlr, nlc);
   double *b = new double[nlr];
   double *c = new double[nlc];;
-  long * Basis = new long[m];
-  long * NonBasis = new long[n];
+  long *Basis = new long[m];
+  long *NonBasis = new long[n];
 
   if (s == 0 && t == 0) {
     printf("Linear Optimization of %ld by %ld matrix\n", n, n);
@@ -426,8 +469,8 @@ void easy_test_one_proc() {
   double c[] = {3, 1, 2};
   double v = 0;
 
-  long * Basis = new long[m];
-  long * NonBasis = new long[n];
+  long *Basis = new long[m];
+  long *NonBasis = new long[n];
 
   simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
 
@@ -444,8 +487,8 @@ void easy_test_two_cols() {
 
   int n = 3;
   int m = 3;
-  long * Basis = new long[m];
-  long * NonBasis = new long[n];
+  long *Basis = new long[m];
+  long *NonBasis = new long[n];
 
   if (t == 0) {
     double dA[] = {
@@ -478,8 +521,8 @@ void easy_test_two_cols() {
             &dA[1],
             &dA[2]
     };
-    double * b;
-    double c[] = { 1 };
+    double *b;
+    double c[] = {1};
     double v = 0;
     simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   }
@@ -497,8 +540,8 @@ void easy_test_two_rows() {
   int n = 3;
   int m = 3;
 
-  long * Basis = new long[m];
-  long * NonBasis = new long[n];
+  long *Basis = new long[m];
+  long *NonBasis = new long[n];
 
   if (s == 0) {
     double dA[] = {
@@ -534,7 +577,6 @@ void easy_test_two_rows() {
 }
 
 void simplex_from_file() {
-  PRINT_TABLES = false;
   bsp_begin(M * N);
   long p = bsp_nprocs(); /* p=M*N */
   long pid = bsp_pid();
@@ -575,9 +617,9 @@ void simplex_from_file() {
   double **A = matallocd(nlr, nlc);
   double *b = new double[nlr];
   double *c = new double[nlc];
-  bsp_push_reg(A[0], nlr*nlc*sizeof(double));
-  bsp_push_reg(b, nlr*nlc*sizeof(double));
-  bsp_push_reg(c, nlr*nlc*sizeof(double));
+  bsp_push_reg(A[0], nlr * nlc * sizeof(double));
+  bsp_push_reg(b, nlr * nlc * sizeof(double));
+  bsp_push_reg(c, nlr * nlc * sizeof(double));
   bsp_sync();
 
   if (s == 0 && t == 0) {
@@ -586,36 +628,36 @@ void simplex_from_file() {
     printf("Now reading the problem...\n");
 
 
-    long maxLRows = ceil(((double)m)/M);
-    long maxLCols = ceil(((double)n)/N);
+    long maxLRows = ceil(((double) m) / M);
+    long maxLCols = ceil(((double) n) / N);
 
-    double ** gA = matallocd(M*N,maxLRows * maxLCols);
+    double **gA = matallocd(M * N, maxLRows * maxLCols);
     std::ifstream fileA;
     fileA.open(std::to_string(n) + "-A.csv");
     if (!fileA) bsp_abort(("Could not open file: " + std::to_string(n) + "-A.csv").c_str());
     for (long i = 0; i < m; i++) {
       std::string cell;
       for (long j = 0; j < n; j++) {
-        if(!std::getline(fileA, cell, ',')) bsp_abort("Couldn't read A");
-        gA[(i%M) * N + j%N][i/M * nloc(N,j%N,n) + j/N] = std::stod(cell);
+        if (!std::getline(fileA, cell, ',')) bsp_abort("Couldn't read A");
+        gA[(i % M) * N + j % N][i / M * nloc(N, j % N, n) + j / N] = std::stod(cell);
       }
     }
     fileA.close();
 
-    double ** gb = matallocd(M, maxLRows);
+    double **gb = matallocd(M, maxLRows);
     std::ifstream fileb;
     fileb.open(std::to_string(n) + "-b.csv");
     if (!fileb) bsp_abort(("Could not open file: " + std::to_string(n) + "-b.csv").c_str());
     for (long i = 0; i < m; i++) {
       std::string cell;
-      if(!std::getline(fileb, cell)) bsp_abort("Couldn't read b");
+      if (!std::getline(fileb, cell)) bsp_abort("Couldn't read b");
       gb[i % M][i / M] = std::stod(cell);
     }
     fileb.close();
 
 
-    double ** gc = matallocd(N, maxLCols);
-    std::ifstream filec (std::to_string(n) + "-c.csv");
+    double **gc = matallocd(N, maxLCols);
+    std::ifstream filec(std::to_string(n) + "-c.csv");
     for (long j = 0; j < n; j++) {
       std::string cell;
       std::getline(filec, cell);
@@ -625,12 +667,12 @@ void simplex_from_file() {
 
     for (long i = 0; i < M; i++) {
       for (long j = 0; j < N; j++) {
-        bsp_put(i*N + j, gA[i*N + j], A[0], 0, nloc(M, i, m)*nloc(N,j,n) * sizeof(double));
+        bsp_put(i * N + j, gA[i * N + j], A[0], 0, nloc(M, i, m) * nloc(N, j, n) * sizeof(double));
       }
-      bsp_put(i*N + 0, gb[i], b, 0, nloc(M,i,m)*sizeof(double));
+      bsp_put(i * N + 0, gb[i], b, 0, nloc(M, i, m) * sizeof(double));
     }
     for (long j = 0; j < N; j++) {
-      bsp_put(0*N + j, gc[j], c, 0, nloc(N,j,n)*sizeof(double));
+      bsp_put(0 * N + j, gc[j], c, 0, nloc(N, j, n) * sizeof(double));
     }
 
     bsp_sync();
@@ -646,8 +688,8 @@ void simplex_from_file() {
   bsp_pop_reg(b);
   bsp_pop_reg(c);
   bsp_sync();
-  long * Basis = new long[m];
-  long * NonBasis = new long[n];
+  long *Basis = new long[m];
+  long *NonBasis = new long[n];
 
   if (s == 0 && t == 0)
     printf("Start of Linear Optimization\n");
@@ -673,6 +715,7 @@ void simplex_from_file() {
 
 
 int main(int argc, char **argv) {
+  if (argc >= 3) PRINT_TABLES = true;
   bsp_init(simplex_from_file, argc, argv);
 
   printf("Please enter number of processor rows M:\n");
