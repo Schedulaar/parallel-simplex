@@ -11,7 +11,7 @@ int index(int i, int j, int rowLength) {
   return i * rowLength + j;
 }
 
-double EPS = 1e-10;
+double EPS = 1e-20;
 
 void swap(int &x, int &y) {
   int tmp = x;
@@ -305,7 +305,7 @@ void testPhase1() {
 }
 
 void testFromFile() {
-  PRINT = false;
+  PRINT = true;
   long n;
   printf("Choose matrix size nxn!\n");
   scanf("%li", &n);

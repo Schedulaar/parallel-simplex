@@ -28,6 +28,12 @@ double **matallocd(size_t m, size_t n) {
   return ppd;
 }
 
+void swap(long &a, long &b) {
+  long tmp = a;
+  a = b;
+  b = tmp;
+}
+
 long nloc(long p, long s, long n) {
   /* Compute number of local components of processor s for vector
      of length n distributed cyclically over p processors.
@@ -47,7 +53,8 @@ void matfreed(double **ppd) {
   }
 }
 
-void print_tableau(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b, double v) {
+void print_tableau(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b, double v,
+                   long * Basis, long * NonBasis) {
   if (s == 0 && t == 0) {
     printf("--------------------\n");
     printf("z  = %+.2f", v);
@@ -55,7 +62,7 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
   bsp_sync();
   for (int j = 0; j < n; j++) {
     if (j % N == t && s == 0)
-      printf(" %+.2f*x?", c[j / N]);
+      printf(" %+.2f*x%li", c[j / N], NonBasis[j]);
     bsp_sync();
   }
   if (s == 0 && t == 0)
@@ -63,11 +70,11 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
   bsp_sync();
   for (int i = 0; i < m; i++) {
     if (i % M == s && t == 0)
-      printf("x? = %+.2f", b[i / M]);
+      printf("x%li = %+.2f", Basis[i], b[i / M]);
     bsp_sync();
     for (int j = 0; j < n; j++) {
       if (i % M == s && j % N == t)
-        printf(" %+.2f*x?", -A[i / M][j / N]);
+        printf(" %+.2f*x%li", -A[i / M][j / N], NonBasis[j]);
       bsp_sync();
     }
     if (s == 0 && t == 0)
@@ -75,7 +82,8 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
   }
 }
 
-void simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b) {
+void simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
+             long * Basis, long * NonBasis) {
   double v = 0;
   double *cLocalMaxima;
   long *cLocalMaximaIndices;
@@ -89,6 +97,12 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
   double ce;
   int status = RUNNING;
   double EPS = 1e-20;
+
+  for (long j = 0; j < n; j++)
+    NonBasis[j] = j;
+  for (long i = 0; i < m; i++)
+    Basis[i] = n+i;
+
 
   bsp_push_reg(aie, nloc(M, s, m) * sizeof(double));
   bsp_push_reg(alj, nloc(N, t, n) * sizeof(double));
@@ -108,7 +122,7 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
 
   while (true) {
     if (PRINT_TABLES)
-      print_tableau(M, N, s, t, m, n, A, c, b, v);
+      print_tableau(M, N, s, t, m, n, A, c, b, v, Basis, NonBasis);
 
     // Find some e maximizing c[e]
     e = 0; // global column index
@@ -217,6 +231,8 @@ void simplex(long M, long N, long s, long t, long m, long n, double **A, double 
       bsp_sync();
       if (status == UNBOUNDED) break;
     }
+    swap(Basis[l], NonBasis[e]);
+
 
     // Compute row l
     if (l % M == s) { // Then processor handles row l
@@ -329,6 +345,8 @@ void simplex_test() {
   double **A = matallocd(nlr, nlc);
   double *b = new double[nlr];
   double *c = new double[nlc];;
+  long * Basis = new long[m];
+  long * NonBasis = new long[n];
 
   if (s == 0 && t == 0) {
     printf("Linear Optimization of %ld by %ld matrix\n", n, n);
@@ -355,7 +373,7 @@ void simplex_test() {
   bsp_sync();
   double time0 = bsp_time();
 
-  simplex(M, N, s, t, m, n, A, c, b);
+  simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   bsp_sync();
   double time1 = bsp_time();
 
@@ -366,7 +384,8 @@ void simplex_test() {
   matfreed(A);
   delete[] b;
   delete[] c;
-
+  delete[] Basis;
+  delete[] NonBasis;
   bsp_end();
 }
 
@@ -398,7 +417,10 @@ void easy_test_one_proc() {
   double c[] = {3, 1, 2};
   double v = 0;
 
-  simplex(M, N, s, t, m, n, A, c, b);
+  long * Basis = new long[m];
+  long * NonBasis = new long[n];
+
+  simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
 
   bsp_end();
 }
@@ -413,6 +435,8 @@ void easy_test_two_cols() {
 
   int n = 3;
   int m = 3;
+  long * Basis = new long[m];
+  long * NonBasis = new long[n];
 
   if (t == 0) {
     double dA[] = {
@@ -433,7 +457,7 @@ void easy_test_two_cols() {
     double c[] = {3, 2};
     double v = 0;
 
-    simplex(M, N, s, t, m, n, A, c, b);
+    simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   } else {
     double dA[] = {
             1,
@@ -448,7 +472,7 @@ void easy_test_two_cols() {
     double * b;
     double c[] = { 1 };
     double v = 0;
-    simplex(M, N, s, t, m, n, A, c, b);
+    simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   }
   bsp_end();
 }
@@ -463,6 +487,9 @@ void easy_test_two_rows() {
 
   int n = 3;
   int m = 3;
+
+  long * Basis = new long[m];
+  long * NonBasis = new long[n];
 
   if (s == 0) {
     double dA[] = {
@@ -479,7 +506,7 @@ void easy_test_two_rows() {
     };
     double c[] = {3, 1, 2};
     double v = 0;
-    simplex(M, N, s, t, m, n, A, c, b);
+    simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   } else {
     double dA[] = {
             2, 2, 5
@@ -492,13 +519,13 @@ void easy_test_two_rows() {
     };
     double *c;
     double v = 0;
-    simplex(M, N, s, t, m, n, A, c, b);
+    simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   }
   bsp_end();
 }
 
 void simplex_from_file() {
-  PRINT_TABLES = false;
+  PRINT_TABLES = true;
   bsp_begin(M * N);
   long p = bsp_nprocs(); /* p=M*N */
   long pid = bsp_pid();
@@ -610,13 +637,15 @@ void simplex_from_file() {
   bsp_pop_reg(b);
   bsp_pop_reg(c);
   bsp_sync();
+  long * Basis = new long[m];
+  long * NonBasis = new long[n];
 
   if (s == 0 && t == 0)
     printf("Start of Linear Optimization\n");
   bsp_sync();
   double time0 = bsp_time();
 
-  simplex(M, N, s, t, m, n, A, c, b);
+  simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   bsp_sync();
   double time1 = bsp_time();
 
@@ -627,6 +656,8 @@ void simplex_from_file() {
   matfreed(A);
   delete[] b;
   delete[] c;
+  delete[] Basis;
+  delete[] NonBasis;
 
   bsp_end();
 }
