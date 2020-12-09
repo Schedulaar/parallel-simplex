@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 
+struct result { double z; long iters; };
 
 long M, N;
 enum STATUS { RUNNING, SUCCESS, UNBOUNDED };
@@ -82,7 +83,7 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
   }
 }
 
-double simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
+result simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
              long * Basis, long * NonBasis) {
   double v = 0;
   double *cLocalMaxima;
@@ -120,7 +121,10 @@ double simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   bsp_push_reg(&ce, sizeof(double));
   bsp_sync();
 
+  long iterations = 0;
+
   while (true) {
+    iterations++;
     if (PRINT_TABLES)
       print_tableau(M, N, s, t, m, n, A, c, b, v, Basis, NonBasis);
 
@@ -304,7 +308,10 @@ double simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   delete [] alj;
   delete [] aie;
 
-  return v;
+  return {
+    .z =  v,
+    .iters = iterations
+  };
 }
 
 
@@ -647,12 +654,12 @@ void simplex_from_file() {
   bsp_sync();
   double time0 = bsp_time();
 
-  double z = simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
+  result res = simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   bsp_sync();
   double time1 = bsp_time();
 
   if (s == 0 && t == 0) {
-    printf("End of Linear Optimization: Optimal value: %lf\n", z);
+    printf("End of Linear Optimization: Optimal value %lf using %li iterations.\n", res.z, res.iters);
     printf("This took only %.6lf seconds.\n", time1 - time0);
   }
   matfreed(A);
