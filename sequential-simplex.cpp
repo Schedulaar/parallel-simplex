@@ -1,6 +1,11 @@
 #include <cstdio>
 #include <cmath>
 #include <string>
+#include <iostream>
+#include <fstream>
+#include <chrono>
+
+bool PRINT = true;
 
 int index(int i, int j, int rowLength) {
   return i * rowLength + j;
@@ -81,8 +86,8 @@ std::string simplex_slack(
         int N[], int B[], double A[], double b[], double c[], double v, int n, int m, // inputs
         double x[], double &z                                                         // outputs
 ) {
-
-  print_slack(N, B, A, b, c, v, n, m);
+  if (PRINT)
+    print_slack(N, B, A, b, c, v, n, m);
   int e = 0;
   for (int j = 1; j < m; j++)
     e = c[j]>c[e] ? j : e;
@@ -97,12 +102,12 @@ std::string simplex_slack(
     }
     if (imin == -1) return "unbounded";
 
-    printf("x%i enters; x%i leaves.\n", N[e], B[imin]);
+    if (PRINT) printf("x%i enters; x%i leaves.\n", N[e], B[imin]);
 
     pivot(N, B, A, b, c, v, imin, e, n, m, // inputs
           N, B, A, b, c, v);            // outputs
 
-    print_slack(N, B, A, b, c, v, n, m);
+    if (PRINT) print_slack(N, B, A, b, c, v, n, m);
 
     e = 0;
     for (int j = 1; j < m; j++)
@@ -299,7 +304,65 @@ void testPhase1() {
   printf("%lf, %lf: %lf\n", x[0], x[1], z);
 }
 
+void testFromFile() {
+  PRINT = false;
+  long n;
+  printf("Choose matrix size nxn!\n");
+  scanf("%li", &n);
+  long m = n;
+
+  double * A = new double[m*n];
+  std::ifstream fileA;
+  fileA.open(std::to_string(n) + "-A.csv");
+  if (!fileA) std::cout << "Could not open file: " + std::to_string(n) + "-A.csv";
+  for (long i = 0; i < m; i++) {
+    std::string cell;
+    for (long j = 0; j < n; j++) {
+      if(!std::getline(fileA, cell, ',')) printf("Couldn't read A");
+      A[index(i,j,n)] = std::stod(cell);
+    }
+  }
+  fileA.close();
+
+  double * b = new double[m];
+  std::ifstream fileb;
+  fileb.open(std::to_string(n) + "-b.csv");
+  if (!fileb) std::cout << "Could not open file: " + std::to_string(n) + "-b.csv";
+  std::string cell;
+  for (long i = 0; i < m; i++) {
+    if(!std::getline(fileb, cell)) printf("Couldn't read b");
+    b[i] = std::stod(cell);
+  }
+  fileb.close();
+
+  double * c = new double[n];
+  std::ifstream filec (std::to_string(n) + "-c.csv");
+  for (long j = 0; j < n; j++) {
+    std::string cell;
+    std::getline(filec, cell);
+    c[j] = std::stod(cell);
+  }
+  filec.close();
+
+  double * x = new double[m+n];
+  double z;
+
+  printf("Starting Linear Optimization...\n");
+  auto start = std::chrono::high_resolution_clock::now();
+
+  simplex(A, b, c, n, m, x, z);
+
+  auto finish = std::chrono::high_resolution_clock::now();
+  printf("Finished Linear Optimization...\n");
+  std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count() << "ns\n";
+
+  delete[] x;
+  delete[] A;
+  delete[] b;
+  delete[] c;
+}
+
 int main(int argc, char **argv) {
-  testPhase1();
+  testFromFile();
   return 0;
 }
