@@ -7,28 +7,28 @@
 
 bool PRINT = false;
 
-int index(int i, int j, int rowLength) {
+long index(long i, long j, long rowLength) {
   return i * rowLength + j;
 }
 
 double EPS = 1e-20;
 
-void swap(int &x, int &y) {
-  int tmp = x;
+void swap(long &x, long &y) {
+  long tmp = x;
   x = y;
   y = tmp;
 }
 
-void print_slack(int N[], int B[], double A[], double b[], double c[], double v, int n, int m) {
+void print_slack(long N[], long B[], double A[], double b[], double c[], double v, long n, long m) {
   printf("--------------------\n");
   printf("z  = %+.2f", v);
-  for (int j = 0; j < n; j++)
-    printf(" %+.2f*x%i", c[j], N[j]);
+  for (long j = 0; j < n; j++)
+    printf(" %+.2f*x%li", c[j], N[j]);
   printf("\n");
-  for (int i = 0; i < m; i++) {
-    printf("x%i = %+.2f", B[i], b[i]);
-    for (int j = 0; j < n; j++)
-      printf(" %+.2f*x%i", -A[index(i, j, n)], N[j]);
+  for (long i = 0; i < m; i++) {
+    printf("x%li = %+.2f", B[i], b[i]);
+    for (long j = 0; j < n; j++)
+      printf(" %+.2f*x%li", -A[index(i, j, n)], N[j]);
     printf("\n");
   }
 }
@@ -38,24 +38,24 @@ void print_slack(int N[], int B[], double A[], double b[], double c[], double v,
  * It is possible to use the input variables as output variables as well.
  */
 void pivot(
-        int N[], int B[], double A[], double b[], double c[], double v, int l, int e, int n, int m, // inputs
-        int oN[], int oB[], double oA[], double ob[], double oc[], double &ov                       // outputs
+        long N[], long B[], double A[], double b[], double c[], double v, long l, long e, long n, long m, // inputs
+        long oN[], long oB[], double oA[], double ob[], double oc[], double &ov                       // outputs
 ) {
   // We will put x_N[e] into row l of the matrix and conversely put x_B[l] into column e.
 
   // Compute the coefficients of the equation for new basic variable x_N[e].
   ob[l] = b[l] / A[index(l, e, n)];
-  for (int j = 0; j < n; j++) {
+  for (long j = 0; j < n; j++) {
     if (j == e) continue;
     oA[index(l, j, n)] = A[index(l, j, n)] / A[index(l, e, n)];
   }
   oA[index(l, e, n)] = 1 / A[index(l, e, n)];
 
   // Compute the coefficients of the remaining constraints.
-  for (int i = 0; i < m; i++) {
+  for (long i = 0; i < m; i++) {
     if (i == l) continue;
     ob[i] = b[i] - A[index(i, e, n)] * ob[l];
-    for (int j = 0; j < n; j++) {
+    for (long j = 0; j < n; j++) {
       if (j == e) continue;
       oA[index(i, j, n)] = A[index(i, j, n)] - A[index(i, e, n)] * oA[index(l, j, n)];
     }
@@ -64,7 +64,7 @@ void pivot(
 
   // Compute the objective function
   ov = v + c[e] * ob[l];
-  for (int j = 0; j < n; j++) {
+  for (long j = 0; j < n; j++) {
     if (j == e) continue;
     oc[j] = c[j] - c[e] * oA[index(l, j, n)];
   }
@@ -72,10 +72,10 @@ void pivot(
 
   // Compute new sets of basic and nonbasic variables
   if (oB != B || N != oN) {
-    for (int j = 0; j < m; j++) {
+    for (long j = 0; j < m; j++) {
       oB[j] = B[j];
     }
-    for (int i = 0; i < n; i++) {
+    for (long i = 0; i < n; i++) {
       oN[i] = N[i];
     }
   }
@@ -83,26 +83,26 @@ void pivot(
 }
 
 std::string simplex_slack(
-        int N[], int B[], double A[], double b[], double c[], double v, int n, int m, // inputs
+        long N[], long B[], double A[], double b[], double c[], double v, long n, long m, // inputs
         double x[], double &z                                                         // outputs
 ) {
   if (PRINT)
     print_slack(N, B, A, b, c, v, n, m);
-  int e = 0;
-  for (int j = 1; j < m; j++)
+  long e = 0;
+  for (long j = 1; j < m; j++)
     e = c[j]>c[e] ? j : e;
   while (c[e] > EPS) { // While there exists j with c_j > 0
 
     // Find i in B minimizing b_i / a_ie
-    int imin = -1;
-    for (int i = 0; i < n; i++) {
+    long imin = -1;
+    for (long i = 0; i < n; i++) {
       if (A[index(i, e, n)] > EPS &&
           (imin == -1 || b[imin] / A[index(imin, e, n)] > b[i] / A[index(i, e, n)]))
         imin = i;
     }
     if (imin == -1) return "unbounded";
 
-    if (PRINT) printf("x%i enters; x%i leaves.\n", N[e], B[imin]);
+    if (PRINT) printf("x%li enters; x%li leaves.\n", N[e], B[imin]);
 
     pivot(N, B, A, b, c, v, imin, e, n, m, // inputs
           N, B, A, b, c, v);            // outputs
@@ -110,13 +110,13 @@ std::string simplex_slack(
     if (PRINT) print_slack(N, B, A, b, c, v, n, m);
 
     e = 0;
-    for (int j = 1; j < m; j++)
+    for (long j = 1; j < m; j++)
       e = c[j]>c[e] ? j : e;
   }
 
-  for (int j = 0; j < m; j++)
+  for (long j = 0; j < m; j++)
     x[B[j]] = b[j];
-  for (int i = 0; i < n; i++)
+  for (long i = 0; i < n; i++)
     x[N[i]] = 0;
   z = v;
 
@@ -124,42 +124,42 @@ std::string simplex_slack(
 }
 
 std::string simplex(
-        double A[], double b[], double c[], int n, int m,
+        double A[], double b[], double c[], long n, long m,
         double x[], double &z
 ) {
-  int *N = new int[n];
-  int *B = new int[m];
+  long *N = new long[n];
+  long *B = new long[m];
   double v;
 
   // PHASE 1: Find initial solution.
 
   // Find k minimizing b[i]
-  int k = 0;
-  for (int i = 1; i < m; i++)
+  long k = 0;
+  for (long i = 1; i < m; i++)
     k = b[i] < b[k] ? i : k;
   if (b[k] >= 0) { // We can use the canonical slack form initially.
-    for (int i = 0; i < n; i++)
+    for (long i = 0; i < n; i++)
       N[i] = i;
-    for (int j = 0; j < m; j++)
+    for (long j = 0; j < m; j++)
       B[j] = n + j;
     v = 0;
   } else { // We have to solve an auxiliary problem, to find an initial solution.
     double *auxA = new double[m * (n + 1)];
     double *auxc = new double[n + 1];
     double *auxb = new double[m];
-    int *auxN = new int[n + 1];
-    int *auxB = new int[m];
+    long *auxN = new long[n + 1];
+    long *auxB = new long[m];
 
-    for (int i = 0; i < n + 1; i++) {
+    for (long i = 0; i < n + 1; i++) {
       auxc[i] = i == n ? -1. : 0.;
       auxN[i] = i == n ? n+m : i;
     }
-    for (int j = 0; j < m; j++) {
+    for (long j = 0; j < m; j++) {
       auxB[j] = n + j;
       auxb[j] = b[j];
     }
-    for (int i = 0; i < m; i++) {
-      for (int j = 0; j < n + 1; j++) {
+    for (long i = 0; i < m; i++) {
+      for (long j = 0; j < n + 1; j++) {
         auxA[index(i, j, n + 1)] = j == n ? -1. : A[index(i, j, n)];
       }
     }
@@ -179,10 +179,10 @@ std::string simplex(
     if (auxz > EPS) return "infeasible";
 
     // Check whether n+m is a basis variable. If so, do a non-degenerate pivot.
-    for (int l = 0; l < m; l++) {
+    for (long l = 0; l < m; l++) {
       if (auxB[l] == n + m){
-        int e = 0;
-        for (int j = 1; j < m; j++) {
+        long e = 0;
+        for (long j = 1; j < m; j++) {
           if (std::abs(auxA[index(e, j, n + 1)]) > std::abs(auxA[index(e, l, n + 1)]))
             e = j;
         }
@@ -195,31 +195,31 @@ std::string simplex(
     // Finally we have an initial solution.
     // Now, we remove variable n+m again.
 
-    int remCol = n + 1;
-    for (int j = 0; j < n + 1; j++) {
+    long remCol = n + 1;
+    for (long j = 0; j < n + 1; j++) {
       if (auxN[j] == n+m)
         remCol = j;
       else
         N[j > remCol ? j - 1 : j] = auxN[j];
     }
-    for (int i = 0; i < m; i++) {
+    for (long i = 0; i < m; i++) {
       B[i] = auxB[i];
       b[i] = auxb[i];
     }
 
     // Remove column where variable x_{n+m} was in
-    for (int j = 0; j < n + 1; j++) {
+    for (long j = 0; j < n + 1; j++) {
       if (j == remCol) continue;
-      for (int i = 0; i < m; i++) {
+      for (long i = 0; i < m; i++) {
         A[index(i, j - (j > remCol), n)] = auxA[index(i, j, n + 1)];
       }
     }
 
     // Build c
     double *newc = new double[n];
-    for (int j = 0; j < n; j++) {
+    for (long j = 0; j < n; j++) {
       newc[j] = N[j] < n ? c[N[j]] : 0;
-      for (int i = 0; i < m; i++) {
+      for (long i = 0; i < m; i++) {
         if (B[i] < n)
           newc[j] -= c[B[i]] * A[index(j, i, n)];
       }
@@ -227,12 +227,12 @@ std::string simplex(
 
     // Build v
     v = 0;
-    for (int i = 0; i < m; i++) {
+    for (long i = 0; i < m; i++) {
       if (B[i] < n)
         v += c[B[i]] * b[i];
     }
 
-    for (int j = 0; j < n; j++) c[j] = newc[j];
+    for (long j = 0; j < n; j++) c[j] = newc[j];
     delete[] newc;
   }
 
@@ -242,11 +242,11 @@ std::string simplex(
 }
 
 void test() {
-  int n = 3;
-  int m = 3;
+  long n = 3;
+  long m = 3;
   // inputs
-  int N[] = {0, 1, 2};
-  int B[] = {3, 4, 5};
+  long N[] = {0, 1, 2};
+  long B[] = {3, 4, 5};
   double A[] = {
           1, 1, 3,
           2, 2, 5,
@@ -259,16 +259,16 @@ void test() {
   };
   double c[] = {3, 1, 2};
   double v = 0;
-  int l = 2;
-  int e = 0;
+  long l = 2;
+  long e = 0;
 
   // outputs
   double nA[n * m];
   double nb[m];
   double nc[m];
   double nv;
-  int nN[m];
-  int nB[n];
+  long nN[m];
+  long nB[n];
 
   double x[n + m];
   double z;
@@ -278,8 +278,8 @@ void test() {
                                      x, z);
   if (result == "success") {
     printf("Found optimal solution with objective value %lf:\n", z);
-    for (int k = 0; k < n + m; k++) {
-      printf("x%i=%lf,\n", k, x[k]);
+    for (long k = 0; k < n + m; k++) {
+      printf("x%li=%lf,\n", k, x[k]);
     }
   } else if (result == "unbounded") {
     printf("The problem is unbounded!\n");
