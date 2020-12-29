@@ -84,7 +84,7 @@ void pivot(
 
 std::string simplex_slack(
         long N[], long B[], double A[], double b[], double c[], double v, long n, long m, // inputs
-        double x[], double &z                                                         // outputs
+        double &z                                                         // outputs
 ) {
   if (PRINT)
     print_slack(N, B, A, b, c, v, n, m);
@@ -113,11 +113,6 @@ std::string simplex_slack(
     for (long j = 1; j < m; j++)
       e = c[j]>c[e] ? j : e;
   }
-
-  for (long j = 0; j < m; j++)
-    x[B[j]] = b[j];
-  for (long i = 0; i < n; i++)
-    x[N[i]] = 0;
   z = v;
 
   return "success";
@@ -125,10 +120,9 @@ std::string simplex_slack(
 
 std::string simplex(
         double A[], double b[], double c[], long n, long m,
-        double x[], double &z
+        double &z, long* B
 ) {
   long *N = new long[n];
-  long *B = new long[m];
   double v;
 
   // PHASE 1: Find initial solution.
@@ -168,9 +162,8 @@ std::string simplex(
     pivot(auxN, auxB, auxA, auxb, auxc, auxv, k, n, n + 1, m,
           auxN, auxB, auxA, auxb, auxc, auxv);
     double auxz;
-    double *xInit = new double[n + m + 1];
     std::string result = simplex_slack(auxN, auxB, auxA, auxb, auxc, auxv, n + 1, m,
-                                       xInit, auxz);
+                                       auxz);
     if (result != "success") {
       printf("Could not solve the auxiliary problem for finding an initial value.\n"
              "This should never happen.");
@@ -238,7 +231,7 @@ std::string simplex(
 
   // PHASE 2: Find optimal solution.
   return simplex_slack(N, B, A, b, c, v, n, m,
-                       x, z);
+                       z);
 }
 
 void test() {
@@ -270,16 +263,15 @@ void test() {
   long nN[m];
   long nB[n];
 
-  double x[n + m];
   double z;
   // pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
 
   std::string result = simplex_slack(N, B, A, b, c, v, n, m,
-                                     x, z);
+                                     z);
   if (result == "success") {
     printf("Found optimal solution with objective value %lf:\n", z);
-    for (long k = 0; k < n + m; k++) {
-      printf("x%li=%lf,\n", k, x[k]);
+    for (long k = 0; k < m; k++) {
+      printf("x%li=%lf,\n", B[k], b[k]);
     }
   } else if (result == "unbounded") {
     printf("The problem is unbounded!\n");
@@ -297,11 +289,14 @@ void testPhase1() {
           -4
   };
   double c[] = {2, -1};
-  double *x = new double[4];
   double z;
+  long B[2];
   simplex(A, b, c, 2, 2,
-          x, z);
-  printf("%lf, %lf: %lf\n", x[0], x[1], z);
+          z, B);
+  printf("Found optimal solution with objective value %lf:\n", z);
+  for (long k = 0; k < 2; k++) {
+    printf("x%li=%lf,\n", B[k], b[k]);
+  }
 }
 
 void testFromFile() {
@@ -343,20 +338,20 @@ void testFromFile() {
   }
   filec.close();
 
-  double * x = new double[m+n];
   double z;
+  long * B = new long[m];
 
   printf("Starting Linear Optimization...\n");
   auto start = std::chrono::high_resolution_clock::now();
 
-  simplex(A, b, c, n, m, x, z);
+  simplex(A, b, c, n, m, z, B);
 
   auto finish = std::chrono::high_resolution_clock::now();
   printf("Finished Linear Optimization with optimal value %lf\n", z);
   std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count() << "ns\n";
 
-  delete[] x;
   delete[] A;
+  delete[] B;
   delete[] b;
   delete[] c;
 }
