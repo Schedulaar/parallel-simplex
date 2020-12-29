@@ -602,6 +602,10 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
     for (long j = 0; j < n; j++)
       lc[j % N][j / N] = gc[j];
 
+    matfreed(gA);
+    delete[] gb;
+    delete[] gc;
+
     for (long i = 0; i < M; i++) {
       for (long j = 0; j < N; j++) {
         bsp_put(i * N + j, lA[i * N + j], A[0], 0, nloc(M, i, m) * nloc(N, j, n) * sizeof(double));
@@ -612,10 +616,6 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
       bsp_put(0 * N + j, lc[j], c, 0, nloc(N, j, n) * sizeof(double));
 
     bsp_sync();
-
-    matfreed(gA);
-    delete[] gb;
-    delete[] gc;
     matfreed(lA);
     matfreed(lb);
     matfreed(lc);
