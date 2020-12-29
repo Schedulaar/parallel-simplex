@@ -197,7 +197,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         bsp_put(0 * N + k, &cLocalMaximaIndices[t], cLocalMaximaIndices, t * sizeof(long), sizeof(long));
       }
       bsp_sync();
-      if (PROFILING) stepFinished(1);
+      if (PROFILING) stepFinished(1, s, t);
 
       long globalMaximumProc = 0;
       for (long k = 1; k < N; k++) {
@@ -216,7 +216,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         if (PRINT_TABLES && t == 0)
           printf("Found an optimal solution!\n");
         bsp_sync();
-        if (PROFILING) stepFinished(2);
+        if (PROFILING) stepFinished(2, s, t);
         break;
       }
 
@@ -226,12 +226,12 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         bsp_put(k * N + t, &e, &e, 0, sizeof(long));
       }
       bsp_sync();
-      if (PROFILING) stepFinished(2);
+      if (PROFILING) stepFinished(2, s, t);
     } else {
       bsp_sync();
-      if (PROFILING) stepFinished(1);
+      if (PROFILING) stepFinished(1, s, t);
       bsp_sync();
-      if (PROFILING) stepFinished(2);
+      if (PROFILING) stepFinished(2, s, t);
       if (status == SUCCESS) break;
     }
 
@@ -255,7 +255,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       for (long i = 0; i < locRows; i++)
         aie[i] = A[i][edivN];
       bsp_sync();
-      if (PROFILING) stepFinished(3);
+      if (PROFILING) stepFinished(3, s, t);
 
       // Now find maximum
       baLocalMinima[s] = -1;
@@ -278,7 +278,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       }
       bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 0);
       bsp_sync();
-      if (PROFILING) stepFinished(4);
+      if (PROFILING) stepFinished(4, s, t);
 
       bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
 
@@ -298,7 +298,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
           printf("Problem unbounded!\n");
         }
         bsp_sync();
-        if (PROFILING) stepFinished(5);
+        if (PROFILING) stepFinished(5, s, t);
         break;
       }
       l = baLocalMinimaIndices[globalMinimumProc];
@@ -310,16 +310,16 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         bsp_put(s * N + k, &l, &l, 0, sizeof(long));
       }
       bsp_sync();
-      if (PROFILING) stepFinished(5);
+      if (PROFILING) stepFinished(5, s, t);
     } else {
       bsp_sync();
-      if (PROFILING) stepFinished(3);
+      if (PROFILING) stepFinished(3, s ,t);
       bsp_sync();
-      if (PROFILING) stepFinished(4);
+      if (PROFILING) stepFinished(4, s, t);
 
       bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
       bsp_sync();
-      if (PROFILING) stepFinished(5);
+      if (PROFILING) stepFinished(5, s, t);
 
       if (status == UNBOUNDED) break;
     }
@@ -353,11 +353,11 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
 
     bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 0);
     bsp_sync();
-    if (PROFILING) stepFinished(6);
+    if (PROFILING) stepFinished(6, s, t);
 
     bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 1);
     bsp_sync();
-    if (PROFILING) stepFinished(7);
+    if (PROFILING) stepFinished(7, s, t);
 
     // Compute rest of the constraints
     // Compute the coefficients of the remaining constraints.
