@@ -16,6 +16,15 @@ enum STATUS {
   RUNNING, SUCCESS, UNBOUNDED
 };
 bool PRINT_TABLES = false;
+bool PROFILING = false;
+double lastTime;
+double times[] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+void stepFinished(long step) {
+  double newTime = bsp_time();
+  times[step] += newTime - lastTime;
+  lastTime = newTime;
+}
 
 long min(long a, long b) { return a <= b ? a : b; }
 
@@ -123,6 +132,8 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
 
 result simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
                long *Basis, long *NonBasis) {
+  long locRows = nloc(M, s, m);
+  long locCols = nloc(N, t, n);
   double v = 0;
   double *cLocalMaxima;
   long *cLocalMaximaIndices;
@@ -130,8 +141,8 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   long *baLocalMinimaIndices = new long[M];;
   long e = -1; // Entering index
   long l = -1; // Leaving index
-  double *aie = new double[nloc(M, s, m)];
-  double *alj = new double[nloc(N, t, n)];
+  double *aie = new double[locRows];
+  double *alj = new double[locCols];
   double bl;
   double ce;
   int status = RUNNING;
@@ -143,9 +154,9 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     Basis[i] = n + i;
 
 
-  bsp_push_reg(aie, nloc(M, s, m) * sizeof(double));
-  bsp_push_reg(alj, nloc(N, t, n) * sizeof(double));
-  bsp_push_reg(b, nloc(M, s, m) * sizeof(double));
+  bsp_push_reg(aie, locRows * sizeof(double));
+  bsp_push_reg(alj, locCols * sizeof(double));
+  bsp_push_reg(b, locRows * sizeof(double));
   bsp_push_reg(baLocalMinima, M * sizeof(double));
   bsp_push_reg(baLocalMinimaIndices, M * sizeof(long));
   bsp_push_reg(&e, sizeof(long));
@@ -158,6 +169,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   bsp_push_reg(cLocalMaximaIndices, N * sizeof(long)); // global indices of local maxima
   bsp_push_reg(&ce, sizeof(double));
   bsp_sync();
+  if (PROFILING) stepFinished(0);
 
   long iterations = 0;
 
@@ -170,7 +182,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     if (s == 0) {
       cLocalMaxima[t] = c[0];
       cLocalMaximaIndices[t] = t;
-      for (long j = 1; j < nloc(N, t, n); j++) {
+      for (long j = 1; j < locCols; j++) {
         if (c[j] > cLocalMaxima[t]) {
           cLocalMaximaIndices[t] = t + N * j;
           cLocalMaxima[t] = c[j];
@@ -178,10 +190,12 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       }
       // Broadcast local maximum
       for (long k = 0; k < N; k++) {
+        if (k == s) continue;
         bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(double), sizeof(double));
         bsp_put(0 * N + k, &cLocalMaximaIndices[t], cLocalMaximaIndices, t * sizeof(long), sizeof(long));
       }
       bsp_sync();
+      if (PROFILING) stepFinished(1);
 
       long globalMaximumProc = 0;
       for (long k = 1; k < N; k++) {
@@ -192,48 +206,61 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
 
 
       if (cLocalMaxima[globalMaximumProc] <= EPS) {
-        if (t == 0) {
-          status = SUCCESS;
-          printf("Found an optimal solution!\n");
-          for (long k = 0; k < M * N; k++)
-            bsp_put(k, &status, &status, 0, sizeof(STATUS));
+        status = SUCCESS;
+        for (long k = 0; k < M; k++) {
+          if (k == s) continue;
+          bsp_put(k * N + t, &status, &status, 0, sizeof(STATUS));
         }
+        if (PRINT_TABLES && t == 0)
+          printf("Found an optimal solution!\n");
         bsp_sync();
+        if (PROFILING) stepFinished(2);
         break;
       }
 
       // Broadcast e to rest of the column
-      for (long k = 0; k < M; k++)
+      for (long k = 0; k < M; k++) {
+        if (k == s) continue;
         bsp_put(k * N + t, &e, &e, 0, sizeof(long));
+      }
       bsp_sync();
+      if (PROFILING) stepFinished(2);
     } else {
       bsp_sync();
+      if (PROFILING) stepFinished(1);
       bsp_sync();
+      if (PROFILING) stepFinished(2);
       if (status == SUCCESS) break;
     }
 
     // Find l with a_el > 0 minimizing b_l / a_el
     // Do so by first distributing b_i to a_il
     // At the same time, we share column e!
-    if (e % N == t) {
-      bsp_get(s * N + 0, b, 0, b, nloc(M, s, m) * sizeof(double));
+    long eModN = e % N;
+    long edivN = e / N;
+
+    if (t == 0 && eModN != t)
+      bsp_put(s * N + eModN, b, b, 0, locRows * sizeof(double));
+    if (eModN == t) {
       // Start two-phase broadcast of column e
       if (s == 0) {
-        for (long k = 0; k < N; k++)
-          bsp_put(0 * N + k, &c[e / N], &ce, 0, sizeof(double));
+        ce = c[edivN];
+        for (long k = 0; k < N; k++) {
+          if (k == t) continue;
+          bsp_put(0 * N + k, &ce, &ce, 0, sizeof(double));
+        }
       }
-      for (long i = 0; i < nloc(M, s, m); i++)
-        aie[i] = A[i][e / N];
-      bsp_broadcast(aie, nloc(M, s, m), s * N + (e % N), s * N + 0, s * N + t, 1, N, 0);
+      for (long i = 0; i < locRows; i++)
+        aie[i] = A[i][edivN];
       bsp_sync();
-      bsp_broadcast(aie, nloc(M, s, m), s * N + (e % N), s * N + 0, s * N + t, 1, N, 1);
+      if (PROFILING) stepFinished(3);
 
       // Now find maximum
       baLocalMinima[s] = -1;
       baLocalMinimaIndices[s] = -1;
-      for (long i = 0; i < nloc(M, s, m); i++) {
-        if (A[i][e / N] > EPS) {
-          double ba = b[i] / A[i][e / N];
+      for (long i = 0; i < locRows; i++) {
+        if (A[i][edivN] > EPS) {
+          double ba = b[i] / A[i][edivN];
           if (ba < baLocalMinima[s] || baLocalMinimaIndices[s] == -1) {
             baLocalMinima[s] = ba;
             baLocalMinimaIndices[s] = M * i + s;
@@ -243,10 +270,15 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
 
       // Distribute to the rest of column
       for (long k = 0; k < M; k++) {
+        if (k == s) continue;
         bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(double), sizeof(double));
         bsp_put(k * N + t, &baLocalMinimaIndices[s], baLocalMinimaIndices, s * sizeof(long), sizeof(long));
       }
+      bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 0);
       bsp_sync();
+      if (PROFILING) stepFinished(4);
+
+      bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
 
       long globalMinimumProc = -1;
       for (long k = 0; k < M; k++) {
@@ -255,36 +287,49 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
           globalMinimumProc = k;
       }
       if (globalMinimumProc == -1) {
-        if (s == 0) {
+        status = UNBOUNDED;
+        for (long k = 0; k < N; k++) {
+          if (k == t) continue;
+          bsp_put(s * N + k, &status, &status, 0, sizeof(STATUS));
+        }
+        if (PRINT_TABLES && s == 0) {
           printf("Problem unbounded!\n");
-          status = UNBOUNDED;
-          for (long k = 0; k < N * M; k++)
-            bsp_put(k, &status, &status, 0, sizeof(STATUS));
         }
         bsp_sync();
+        if (PROFILING) stepFinished(5);
         break;
       }
       l = baLocalMinimaIndices[globalMinimumProc];
       if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
 
       // Now share l with the rest of the row
-      for (long k = 0; k < N; k++)
+      for (long k = 0; k < N; k++) {
+        if (k == t) continue;
         bsp_put(s * N + k, &l, &l, 0, sizeof(long));
+      }
       bsp_sync();
+      if (PROFILING) stepFinished(5);
     } else {
       bsp_sync();
-      bsp_broadcast(aie, nloc(M, s, m), s * N + (e % N), s * N + 0, s * N + t, 1, N, 1);
+      if (PROFILING) stepFinished(3);
       bsp_sync();
+      if (PROFILING) stepFinished(4);
+
+      bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
       bsp_sync();
+      if (PROFILING) stepFinished(5);
+
       if (status == UNBOUNDED) break;
     }
     swap(Basis[l], NonBasis[e]);
 
     // Now we compute row l
-    if (l % M == s) { // Then processor handles row l
-      long i = l / M;
-      for (long j = 0; j < nloc(N, t, n); j++) {
-        if (e % N == t && j == e / N)
+    long lModM = l % M;
+    long lDivM = l / M;
+    if (lModM == s) { // Then processor handles row l
+      long i = lDivM;
+      for (long j = 0; j < locCols; j++) {
+        if (eModN == t && j == edivN)
           A[i][j] = 1 / aie[i];
         else
           A[i][j] /= aie[i];
@@ -293,35 +338,41 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         b[i] /= aie[i];
 
       // Distribute row to the rest of the column
-      for (long j = 0; j < nloc(N,t,n); j++)
+      for (long j = 0; j < locCols; j++)
         alj[j] = A[i][j];
       if (t == 0) {
-        for (long k = 0; k < M; k++)
-          bsp_put(k * N + t, &b[i], &bl, 0, sizeof(double));
+        bl = b[i];
+        for (long k = 0; k < M; k++) {
+          if (k == s) continue;
+          bsp_put(k * N + t, &bl, &bl, 0, sizeof(double));
+        }
       }
     }
 
-    bsp_broadcast(alj, nloc(N, t, n), (l%M)*N + t, 0* N + t, s * N + t, N, M, 0);
+    bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 0);
     bsp_sync();
-    bsp_broadcast(alj, nloc(N, t, n), (l%M)*N + t, 0* N + t, s * N + t, N, M, 1);
+    if (PROFILING) stepFinished(6);
+
+    bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 1);
     bsp_sync();
+    if (PROFILING) stepFinished(7);
 
     // Compute rest of the constraints
     // Compute the coefficients of the remaining constraints.
-    for (long i = 0; i < nloc(M, s, m); i++) {
-      if (l % M == s && i == l / M) continue;
+    for (long i = 0; i < locRows; i++) {
+      if (lModM == s && i == lDivM) continue;
       if (t == 0)
         b[i] -= aie[i] * bl;
-      for (long j = 0; j < nloc(N, t, n); j++) {
-        if (e % N == t && j == e / N)
+      for (long j = 0; j < locCols; j++) {
+        if (eModN == t && j == edivN)
           A[i][j] = -A[i][j] * alj[j];
         else
           A[i][j] -= aie[i] * alj[j];
       }
     }
     if (s == 0) {
-      for (long j = 0; j < nloc(N, t, n); j++) {
-        if (e % N == t && j == e / N)
+      for (long j = 0; j < locCols; j++) {
+        if (eModN == t && j == edivN)
           c[j] = -ce * alj[j];
         else
           c[j] -= ce * alj[j];
@@ -435,6 +486,9 @@ void simplex_test() {
   if (s == 0 && t == 0) {
     printf("End of Linear Optimization\n");
     printf("This took only %.6lf seconds.\n", time1 - time0);
+    for (long i = 0; i < 8; i++) {
+      printf("Step %li took %.6lf seconds.\n", i, times[i]);
+    }
   }
   matfreed(A);
   delete[] b;
@@ -695,7 +749,7 @@ void simplex_from_file() {
   if (s == 0 && t == 0)
     printf("Start of Linear Optimization\n");
   bsp_sync();
-  double time0 = bsp_time();
+  double time0 = lastTime = bsp_time();
 
   result res = simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   bsp_sync();
@@ -704,6 +758,11 @@ void simplex_from_file() {
   if (s == 0 && t == 0) {
     printf("End of Linear Optimization: Optimal value %lf using %li iterations.\n", res.z, res.iters);
     printf("This took only %.6lf seconds.\n", time1 - time0);
+    if (PROFILING) {
+      for (long i = 0; i < 8; i++) {
+        printf("Step %li took %.6lf seconds.\n", i, times[i]);
+      }
+    }
   }
   matfreed(A);
   delete[] b;
