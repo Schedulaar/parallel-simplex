@@ -16,14 +16,16 @@ enum STATUS {
   RUNNING, SUCCESS, UNBOUNDED
 };
 bool PRINT_TABLES = false;
-bool PROFILING = false;
+bool PROFILING = true;
 double lastTime;
 double times[] = {0, 0, 0, 0, 0, 0, 0, 0};
 
-void stepFinished(long step) {
-  double newTime = bsp_time();
-  times[step] += newTime - lastTime;
-  lastTime = newTime;
+void stepFinished(long step, long s, long t) {
+  if (s == 0 && t == 0) {
+    double newTime = bsp_time();
+    times[step] += newTime - lastTime;
+    lastTime = newTime;
+  }
 }
 
 long min(long a, long b) { return a <= b ? a : b; }
@@ -169,7 +171,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   bsp_push_reg(cLocalMaximaIndices, N * sizeof(long)); // global indices of local maxima
   bsp_push_reg(&ce, sizeof(double));
   bsp_sync();
-  if (PROFILING) stepFinished(0);
+  if (PROFILING) stepFinished(0, s, t);
 
   long iterations = 0;
 
@@ -633,8 +635,9 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
   if (s == 0 && t == 0)
     printf("Start of Linear Optimization\n");
   bsp_sync();
-  double time0 = lastTime = bsp_time();
-
+  if (s == 0 && t == 0)
+    lastTime = bsp_time();
+  double time0 = lastTime;
   result res = simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   bsp_sync();
   double time1 = bsp_time();
