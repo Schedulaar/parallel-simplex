@@ -190,7 +190,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       }
       // Broadcast local maximum
       for (long k = 0; k < N; k++) {
-        if (k == s) continue;
+        if (k == t) continue;
         bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(double), sizeof(double));
         bsp_put(0 * N + k, &cLocalMaximaIndices[t], cLocalMaximaIndices, t * sizeof(long), sizeof(long));
       }
