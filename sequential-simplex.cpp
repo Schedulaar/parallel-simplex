@@ -2,6 +2,7 @@
 #include <cmath>
 #include <string>
 #include <iostream>
+#include <random>
 #include <fstream>
 #include <chrono>
 
@@ -356,7 +357,47 @@ void testFromFile() {
   delete[] c;
 }
 
+void testFromRand () {
+  long n;
+  printf("Choose matrix size nxn!\n");
+  scanf("%li", &n);
+  long m = n;
+
+  double z;
+  long * B = new long[m];
+
+  srand(1);
+  std::uniform_real_distribution<double> unif(0., 1.);
+  std::default_random_engine re;
+
+  double * A = new double[m*n];
+  double * b = new double[m];
+  double * c = new double[n];
+  for (long i = 0; i < m; i++) {
+    for (long j = 0; j < n; j++)
+      A[index(i,j,n)] = unif(re);
+    b[i] = unif(re);
+  }
+  for (long j = 0; j < n; j++)
+    c[j] = unif(re);
+
+
+  printf("Starting Linear Optimization...\n");
+  auto start = std::chrono::high_resolution_clock::now();
+
+  simplex(A, b, c, n, m, z, B);
+
+  auto finish = std::chrono::high_resolution_clock::now();
+  printf("Finished Linear Optimization with optimal value %lf\n", z);
+  std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count() << "ns\n";
+
+  delete[] A;
+  delete[] B;
+  delete[] b;
+  delete[] c;
+}
+
 int main(int argc, char **argv) {
-  testFromFile();
+  testFromRand();
   return 0;
 }
