@@ -657,7 +657,7 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
           printf("Step %li took %.6lf seconds.\n", i, times[i]);
         }
       }
-    } else printf("\"t\": %lf},\n", time1 - time0);
+    } else printf("\"t\": %lf, \"k\": %li, \"z\": %lf},\n", time1 - time0, res.iters, res.z);
   }
 
   matfreed(A);
