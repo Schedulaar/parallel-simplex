@@ -12,11 +12,13 @@ struct result {
 };
 
 long M, N;
+long nArg = -1;
+
 enum STATUS {
   RUNNING, SUCCESS, UNBOUNDED
 };
 bool PRINT_TABLES = false;
-bool PROFILING = true;
+bool PROFILING = false;
 double lastTime;
 double times[] = {0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -313,7 +315,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       if (PROFILING) stepFinished(5, s, t);
     } else {
       bsp_sync();
-      if (PROFILING) stepFinished(3, s ,t);
+      if (PROFILING) stepFinished(3, s, t);
       bsp_sync();
       if (PROFILING) stepFinished(4, s, t);
 
@@ -556,15 +558,19 @@ long inputMatrixSize() {
   bsp_push_reg(&N, sizeof(long));
   bsp_sync();
   if (bsp_pid() == 0) {
-    printf("Please enter matrix size n (nxn):\n");
-    if (scanf("%ld", &n) != 1) bsp_abort("Entered number invalid!\n");
+    if (nArg <= 0) {
+      printf("Please enter matrix size n (nxn):\n");
+      if (scanf("%ld", &n) != 1) bsp_abort("Entered number invalid!\n");
+    } else n = nArg;
     for (long q = 0; q < bsp_nprocs(); q++) {
       bsp_put(q, &M, &M, 0, sizeof(long));
       bsp_put(q, &N, &N, 0, sizeof(long));
       bsp_put(q, &n, &n, 0, sizeof(long));
     }
-    printf("Linear Optimization of %ld by %ld matrix\n", n, n);
-    printf("using the %ld by %ld cyclic distribution\n", M, N);
+    if (nArg <= 0) {
+      printf("Linear Optimization of %ld by %ld matrix\n", n, n);
+      printf("using the %ld by %ld cyclic distribution\n", M, N);
+    } else printf(R"({"M": %li, "N": %li, "n": %li, )", M, N, n);
   }
   bsp_sync();
   bsp_pop_reg(&n);
@@ -589,7 +595,7 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
   bsp_sync();
 
   if (s == 0 && t == 0) {
-    printf("Now distributing the problem...\n");
+    if (nArg <= 0) printf("Now distributing the problem...\n");
     long maxLRows = ceil(((double) m) / M);
     long maxLCols = ceil(((double) n) / N);
     double **lA = matallocd(M * N, maxLRows * maxLCols);
@@ -632,7 +638,7 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
   long *Basis = new long[m];
   long *NonBasis = new long[n];
 
-  if (s == 0 && t == 0)
+  if (s == 0 && t == 0 && nArg <= 0)
     printf("Start of Linear Optimization\n");
   bsp_sync();
   if (s == 0 && t == 0)
@@ -643,14 +649,17 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
   double time1 = bsp_time();
 
   if (s == 0 && t == 0) {
-    printf("End of Linear Optimization: Optimal value %lf using %li iterations.\n", res.z, res.iters);
-    printf("This took only %.6lf seconds.\n", time1 - time0);
-    if (PROFILING) {
-      for (long i = 0; i < 8; i++) {
-        printf("Step %li took %.6lf seconds.\n", i, times[i]);
+    if (nArg <= 0) {
+      printf("End of Linear Optimization: Optimal value %lf using %li iterations.\n", res.z, res.iters);
+      printf("This took only %.6lf seconds.\n", time1 - time0);
+      if (PROFILING) {
+        for (long i = 0; i < 8; i++) {
+          printf("Step %li took %.6lf seconds.\n", i, times[i]);
+        }
       }
-    }
+    } else printf("\"t\": %lf},\n", time1 - time0);
   }
+
   matfreed(A);
   delete[] b;
   delete[] c;
@@ -740,16 +749,21 @@ void simplex_from_rand() {
 }
 
 int main(int argc, char **argv) {
-  if (argc >= 3) PRINT_TABLES = true;
   bsp_init(simplex_from_rand, argc, argv);
 
-  printf("Please enter number of processor rows M:\n");
-  if (scanf("%ld", &M) != 1) bsp_abort("Invalid input!");
-  printf("Please enter number of processor columns N:\n");
-  if (scanf("%ld", &N) != 1) bsp_abort("Invalid input!");
+  if (argc == 4) {
+    M = std::stol(argv[1]);
+    N = std::stol(argv[2]);
+    nArg = std::stol(argv[3]);
+  } else {
+    printf("Please enter number of processor rows M:\n");
+    if (scanf("%ld", &M) != 1) bsp_abort("Invalid input!");
+    printf("Please enter number of processor columns N:\n");
+    if (scanf("%ld", &N) != 1) bsp_abort("Invalid input!");
+  }
+
   if (M * N > bsp_nprocs()) {
-    printf("Sorry, only %u processors available.\n", bsp_nprocs());
-    fflush(stdout);
+    if (argc != 4) printf("Sorry, only %u processors available.\n", bsp_nprocs());
     exit(EXIT_FAILURE);
   }
 

@@ -303,7 +303,7 @@ void testPhase1() {
 void testFromFile() {
   long n;
   printf("Choose matrix size nxn!\n");
-  scanf("%li", &n);
+  if (scanf("%li", &n) != 1) printf("Invalid input!");
   long m = n;
 
   double * A = new double[m*n];
@@ -357,10 +357,12 @@ void testFromFile() {
   delete[] c;
 }
 
-void testFromRand () {
+void testFromRand (int argc, char ** argv) {
   long n;
-  printf("Choose matrix size nxn!\n");
-  scanf("%li", &n);
+  if (argc != 2) {
+    printf("Choose matrix size nxn!\n");
+    if (scanf("%li", &n) != 1) printf("Invalid input!");
+  } else n = std::stol(argv[1]);
   long m = n;
 
   double z;
@@ -382,14 +384,17 @@ void testFromRand () {
     c[j] = unif(re);
 
 
-  printf("Starting Linear Optimization...\n");
+  if (argc != 2) printf("Starting Linear Optimization...\n");
   auto start = std::chrono::high_resolution_clock::now();
 
   simplex(A, b, c, n, m, z, B);
 
   auto finish = std::chrono::high_resolution_clock::now();
-  printf("Finished Linear Optimization with optimal value %lf\n", z);
-  std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count() << "ns\n";
+  if (argc != 2) printf("Finished Linear Optimization with optimal value %lf\n", z);
+  double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
+  double s = ((double) ns) * 1e-9;
+  if (argc != 2) printf("This took %lf seconds", s);
+  else printf(R"({"n": %li, "t": %lf},)" "\n", n, s);
 
   delete[] A;
   delete[] B;
@@ -398,6 +403,6 @@ void testFromRand () {
 }
 
 int main(int argc, char **argv) {
-  testFromRand();
+  testFromRand(argc, argv);
   return 0;
 }
