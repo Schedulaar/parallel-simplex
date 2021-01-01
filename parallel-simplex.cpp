@@ -381,7 +381,8 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
 
     // Compute rest of the constraints
     // Compute the coefficients of the remaining constraints.
-    for (long i = 0; i < locRows; i++) {
+    /** We split up cases for s and t to get the best running time.
+     for (long i = 0; i < locRows; i++) {
       if (lModM == s && i == lDivM) continue;
       if (t == 0)
         b[i] -= aie[i] * bl;
@@ -391,7 +392,88 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         else
           A[i][j] -= aie[i] * alj[j];
       }
+     */
+
+
+    if (eModN == t) {
+      if (lModM == s) {
+        if (t == 0) {
+          for (long i = 0; i < locRows; i++) {
+            if (i == lDivM) continue;
+            b[i] -= aie[i] * bl;
+            long j = 0;
+            for (; j < edivN; j++)
+              A[i][j] -= aie[i] * alj[j];
+            A[i][j] = -A[i][j] * alj[j];
+            for (j++; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        } else {
+          for (long i = 0; i < locRows; i++) {
+            if (i == lDivM) continue;
+            long j = 0;
+            for (; j < edivN; j++)
+              A[i][j] -= aie[i] * alj[j];
+            A[i][j] = -A[i][j] * alj[j];
+            for (j++; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        }
+      } else {
+        if (t == 0) {
+          for (long i = 0; i < locRows; i++) {
+            b[i] -= aie[i] * bl;
+            long j = 0;
+            for (; j < edivN; j++)
+              A[i][j] -= aie[i] * alj[j];
+            A[i][j] = -A[i][j] * alj[j];
+            for (j++; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        } else {
+          for (long i = 0; i < locRows; i++) {
+            long j = 0;
+            for (; j < edivN; j++)
+              A[i][j] -= aie[i] * alj[j];
+            A[i][j] = -A[i][j] * alj[j];
+            for (j++; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        }
+      }
+    } else {
+      if (lModM == s) {
+        if (t == 0) {
+          for (long i = 0; i < locRows; i++) {
+            if (i == lDivM) continue;
+            b[i] -= aie[i] * bl;
+            for (long j = 0; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        } else {
+          for (long i = 0; i < locRows; i++) {
+            if (i == lDivM) continue;
+            for (long j = 0; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        }
+      } else {
+        if (t == 0) {
+          for (long i = 0; i < locRows; i++) {
+            b[i] -= aie[i] * bl;
+            for (long j = 0; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        } else {
+          for (long i = 0; i < locRows; i++) {
+            for (long j = 0; j < locCols; j++)
+              A[i][j] -= aie[i] * alj[j];
+          }
+        }
+      }
     }
+    /** End of optimized code **/
+
     if (s == 0) {
       for (long j = 0; j < locCols; j++) {
         if (eModN == t && j == edivN)
