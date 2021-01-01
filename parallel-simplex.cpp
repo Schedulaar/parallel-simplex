@@ -485,7 +485,6 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         v += ce * bl;
     }
     iterations++;
-    bsp_sync();
     if (PROFILING) stepFinished(8, s, t);
   }
 
