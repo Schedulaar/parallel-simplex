@@ -1,7 +1,7 @@
 import random
 
 
-for n in [10, 100, 1000, 1000, 10000]:
+for n in [1000]:
     random.seed("Hello World!")
     fA = open(str(n) + "-A.csv", "w")
     fb = open(str(n) + "-b.csv", "w")
