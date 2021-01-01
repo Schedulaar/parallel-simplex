@@ -6,6 +6,8 @@
 #include <iostream>
 #include <fstream>
 #include <cfloat>
+#include <chrono>
+
 
 struct result {
   double z;
@@ -19,7 +21,7 @@ enum STATUS {
   RUNNING, SUCCESS, UNBOUNDED
 };
 bool PRINT_TABLES = false;
-bool PROFILING = false;
+bool PROFILING = true;
 double lastTime;
 int NUM_STEPS = 9;
 double times[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -379,21 +381,28 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     bsp_sync();
     if (PROFILING) stepFinished(7, s, t);
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     // Compute rest of the constraints
     // Compute the coefficients of the remaining constraints.
     /** We split up cases for s and t to get the best running time.
      for (long i = 0; i < locRows; i++) {
-      if (lModM == s && i == lDivM) continue;
-      if (t == 0)
-        b[i] -= aie[i] * bl;
-      for (long j = 0; j < locCols; j++) {
-        if (eModN == t && j == edivN)
-          A[i][j] = -A[i][j] * alj[j];
-        else
-          A[i][j] -= aie[i] * alj[j];
-      }
+       if (lModM == s && i == lDivM) continue;
+       if (t == 0)
+         b[i] -= aie[i] * bl;
+       for (long j = 0; j < locCols; j++) {
+         if (eModN == t && j == edivN)
+           A[i][j] = -A[i][j] * alj[j];
+         else
+           A[i][j] -= aie[i] * alj[j];
+       }
+     }
      */
 
+    auto finish = std::chrono::high_resolution_clock::now();
+    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
+    double secs = ((double) ns) * 1e-9;
+    printf("(%li,%li): This took %lf\n", s, t, secs);
 
     if (eModN == t) {
       if (lModM == s) {
@@ -824,7 +833,7 @@ void simplex_from_rand() {
   if (bsp_pid() == 0) {
     srand(1);
     std::uniform_real_distribution<double> unif(0., 1.);
-    std::default_random_engine re;
+    std::default_random_engine re (12345);
 
     gA = matallocd(m, n);
     gb = new double[m];
