@@ -5,6 +5,7 @@
 #include <random>
 #include <iostream>
 #include <fstream>
+#include <cfloat>
 
 struct result {
   double z;
@@ -20,7 +21,8 @@ enum STATUS {
 bool PRINT_TABLES = false;
 bool PROFILING = false;
 double lastTime;
-double times[] = {0, 0, 0, 0, 0, 0, 0, 0};
+int NUM_STEPS = 9;
+double times[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 void stepFinished(long step, long s, long t) {
   if (s == 0 && t == 0) {
@@ -134,15 +136,18 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
   }
 }
 
+struct IndexValuePair {
+  long index;
+  double value;
+};
+
 result simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
                long *Basis, long *NonBasis) {
   long locRows = nloc(M, s, m);
   long locCols = nloc(N, t, n);
   double v = 0;
-  double *cLocalMaxima;
-  long *cLocalMaximaIndices;
-  double *baLocalMinima = new double[M];
-  long *baLocalMinimaIndices = new long[M];;
+  auto *cLocalMaxima = new IndexValuePair[N];
+  auto *baLocalMinima = new IndexValuePair[M];
   long e = -1; // Entering index
   long l = -1; // Leaving index
   double *aie = new double[locRows];
@@ -161,16 +166,12 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
   bsp_push_reg(aie, locRows * sizeof(double));
   bsp_push_reg(alj, locCols * sizeof(double));
   bsp_push_reg(b, locRows * sizeof(double));
-  bsp_push_reg(baLocalMinima, M * sizeof(double));
-  bsp_push_reg(baLocalMinimaIndices, M * sizeof(long));
+  bsp_push_reg(baLocalMinima, M * sizeof(IndexValuePair));
   bsp_push_reg(&e, sizeof(long));
   bsp_push_reg(&l, sizeof(long));
   bsp_push_reg(&bl, sizeof(double));
   bsp_push_reg(&status, sizeof(int));
-  cLocalMaxima = new double[N];
-  cLocalMaximaIndices = new long[N];
-  bsp_push_reg(cLocalMaxima, N * sizeof(double));
-  bsp_push_reg(cLocalMaximaIndices, N * sizeof(long)); // global indices of local maxima
+  bsp_push_reg(cLocalMaxima, N * sizeof(IndexValuePair));
   bsp_push_reg(&ce, sizeof(double));
   bsp_sync();
   if (PROFILING) stepFinished(0, s, t);
@@ -184,32 +185,40 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     // Find some e maximizing c[e]
     e = 0; // global column index
     if (s == 0) {
-      cLocalMaxima[t] = c[0];
-      cLocalMaximaIndices[t] = t;
-      for (long j = 1; j < locCols; j++) {
-        if (c[j] > cLocalMaxima[t]) {
-          cLocalMaximaIndices[t] = t + N * j;
-          cLocalMaxima[t] = c[j];
+      long localMaxInd = -1;
+      double localMaxVal = 0;
+      for (long j = 0; j < locCols; j++) {
+        if (c[j] > localMaxVal) {
+          localMaxInd = j;
+          localMaxVal = c[j];
         }
       }
-      // Broadcast local maximum
-      for (long k = 0; k < N; k++) {
-        if (k == t) continue;
-        bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(double), sizeof(double));
-        bsp_put(0 * N + k, &cLocalMaximaIndices[t], cLocalMaximaIndices, t * sizeof(long), sizeof(long));
+
+      // Broadcast local maximum, if there is a possible index
+      if (localMaxVal > 0) {
+        cLocalMaxima[t] = {.index = t + N * localMaxInd, .value = localMaxVal};
+        for (long k = 0; k < N; k++) {
+          if (k == t) continue;
+          cLocalMaxima[k] = {.index=-1, .value=0};
+          bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(IndexValuePair), sizeof(IndexValuePair));
+        }
+      } else {
+        for (long k = 0; k < N; k++) {
+          cLocalMaxima[k] = {.index=-1, .value=0};
+        }
       }
       bsp_sync();
       if (PROFILING) stepFinished(1, s, t);
 
       long globalMaximumProc = 0;
       for (long k = 1; k < N; k++) {
-        if (cLocalMaxima[globalMaximumProc] < cLocalMaxima[k])
+        if (cLocalMaxima[globalMaximumProc].value < cLocalMaxima[k].value)
           globalMaximumProc = k;
       }
-      e = cLocalMaximaIndices[globalMaximumProc];
+      e = cLocalMaxima[globalMaximumProc].index;
 
 
-      if (cLocalMaxima[globalMaximumProc] <= EPS) {
+      if (cLocalMaxima[globalMaximumProc].value <= EPS) {
         status = SUCCESS;
         for (long k = 0; k < M; k++) {
           if (k == s) continue;
@@ -260,23 +269,32 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       if (PROFILING) stepFinished(3, s, t);
 
       // Now find maximum
-      baLocalMinima[s] = -1;
-      baLocalMinimaIndices[s] = -1;
+      long localIndex = -1;
+      double localMin = DBL_MAX;
       for (long i = 0; i < locRows; i++) {
         if (A[i][edivN] > EPS) {
           double ba = b[i] / A[i][edivN];
-          if (ba < baLocalMinima[s] || baLocalMinimaIndices[s] == -1) {
-            baLocalMinima[s] = ba;
-            baLocalMinimaIndices[s] = M * i + s;
+          if (ba < localMin) {
+            localIndex = i;
+            localMin = ba;
           }
         }
       }
 
-      // Distribute to the rest of column
-      for (long k = 0; k < M; k++) {
-        if (k == s) continue;
-        bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(double), sizeof(double));
-        bsp_put(k * N + t, &baLocalMinimaIndices[s], baLocalMinimaIndices, s * sizeof(long), sizeof(long));
+      baLocalMinima[s] = {.index=M * localIndex + s, .value=localMin};
+
+      // Distribute to the rest of column if valid
+      if (localMin >= 0) {
+        for (long k = 0; k < M; k++) {
+          if (k == s) continue;
+          baLocalMinima[k] = {.index=-1, .value=DBL_MAX};
+          bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(IndexValuePair), sizeof(IndexValuePair));
+        }
+      } else {
+        for (long k = 0; k < M; k++) {
+          if (k == s) continue;
+          baLocalMinima[k] = {.index=-1, .value=DBL_MAX};
+        }
       }
       bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 0);
       bsp_sync();
@@ -284,13 +302,14 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
 
       bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
 
-      long globalMinimumProc = -1;
-      for (long k = 0; k < M; k++) {
-        if (baLocalMinimaIndices[k] != -1 &&
-            (globalMinimumProc == -1 || baLocalMinima[k] < baLocalMinima[globalMinimumProc]))
+      long globalMinimumProc = 0;
+      for (long k = 1; k < M; k++) {
+        if (baLocalMinima[k].value < baLocalMinima[globalMinimumProc].value)
           globalMinimumProc = k;
       }
-      if (globalMinimumProc == -1) {
+
+      l = baLocalMinima[globalMinimumProc].index;
+      if (l == -1) {
         status = UNBOUNDED;
         for (long k = 0; k < N; k++) {
           if (k == t) continue;
@@ -303,7 +322,6 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         if (PROFILING) stepFinished(5, s, t);
         break;
       }
-      l = baLocalMinimaIndices[globalMinimumProc];
       if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
 
       // Now share l with the rest of the row
@@ -385,28 +403,24 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         v += ce * bl;
     }
     iterations++;
+    bsp_sync();
+    if (PROFILING) stepFinished(8, s, t);
   }
 
   bsp_pop_reg(aie);
   bsp_pop_reg(alj);
   bsp_pop_reg(b);
   bsp_pop_reg(baLocalMinima);
-  bsp_pop_reg(baLocalMinimaIndices);
   bsp_pop_reg(&e);
   bsp_pop_reg(&l);
   bsp_pop_reg(&bl);
   bsp_pop_reg(&status);
 
-  if (s == 0) {
-    bsp_pop_reg(cLocalMaxima);
-    bsp_pop_reg(cLocalMaximaIndices);
-    bsp_pop_reg(&ce);
-    delete[] cLocalMaxima;
-    delete[] cLocalMaximaIndices;
-  }
+  bsp_pop_reg(cLocalMaxima);
+  bsp_pop_reg(&ce);
+  delete[] cLocalMaxima;
 
   delete[] baLocalMinima;
-  delete[] baLocalMinimaIndices;
   delete[] alj;
   delete[] aie;
 
@@ -653,7 +667,7 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
       printf("End of Linear Optimization: Optimal value %lf using %li iterations.\n", res.z, res.iters);
       printf("This took only %.6lf seconds.\n", time1 - time0);
       if (PROFILING) {
-        for (long i = 0; i < 8; i++) {
+        for (long i = 0; i < NUM_STEPS; i++) {
           printf("Step %li took %.6lf seconds.\n", i, times[i]);
         }
       }
