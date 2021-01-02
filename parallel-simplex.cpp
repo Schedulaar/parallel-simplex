@@ -399,11 +399,6 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
      }
      */
 
-    auto finish = std::chrono::high_resolution_clock::now();
-    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
-    double secs = ((double) ns) * 1e-9;
-    printf("(%li,%li): This took %lf\n", s, t, secs);
-
     if (eModN == t) {
       if (lModM == s) {
         if (t == 0) {
@@ -483,6 +478,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     }
     /** End of optimized code **/
 
+
     if (s == 0) {
       for (long j = 0; j < locCols; j++) {
         if (eModN == t && j == edivN)
@@ -494,6 +490,13 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         v += ce * bl;
     }
     iterations++;
+
+
+    auto finish = std::chrono::high_resolution_clock::now();
+    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
+    double secs = ((double) ns) * 1e-9;
+    printf("(%li,%li): This took %lf\n", s, t, secs);
+
     if (PROFILING) stepFinished(8, s, t);
   }
 
