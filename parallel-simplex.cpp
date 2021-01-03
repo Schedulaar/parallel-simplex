@@ -8,8 +8,8 @@
 #include <cfloat>
 #include <chrono>
 
-using flt = double;
-flt F_MAX = DBL_MAX;
+using flt = float;
+flt F_MAX = FLT_MAX;
 
 struct result {
   double z;

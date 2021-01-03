@@ -6,13 +6,15 @@
 #include <fstream>
 #include <chrono>
 
+using flt = float;
+
 bool PRINT = false;
 
 long index(long i, long j, long rowLength) {
   return i * rowLength + j;
 }
 
-double EPS = 1e-20;
+flt EPS = 1e-20;
 
 void swap(long &x, long &y) {
   long tmp = x;
@@ -20,7 +22,7 @@ void swap(long &x, long &y) {
   y = tmp;
 }
 
-void print_slack(long N[], long B[], double A[], double b[], double c[], double v, long n, long m) {
+void print_slack(long N[], long B[], flt A[], flt b[], flt c[], flt v, long n, long m) {
   printf("--------------------\n");
   printf("z  = %+.2f", v);
   for (long j = 0; j < n; j++)
@@ -39,8 +41,8 @@ void print_slack(long N[], long B[], double A[], double b[], double c[], double 
  * It is possible to use the input variables as output variables as well.
  */
 void pivot(
-        long N[], long B[], double A[], double b[], double c[], double v, long l, long e, long n, long m, // inputs
-        long oN[], long oB[], double oA[], double ob[], double oc[], double &ov                       // outputs
+        long N[], long B[], flt A[], flt b[], flt c[], flt v, long l, long e, long n, long m, // inputs
+        long oN[], long oB[], flt oA[], flt ob[], flt oc[], flt &ov                       // outputs
 ) {
   // We will put x_N[e] into row l of the matrix and conversely put x_B[l] into column e.
 
@@ -84,8 +86,8 @@ void pivot(
 }
 
 std::string simplex_slack(
-        long N[], long B[], double A[], double b[], double c[], double v, long n, long m, // inputs
-        double &z, long &iters                                                            // outputs
+        long N[], long B[], flt A[], flt b[], flt c[], flt v, long n, long m, // inputs
+        flt &z, long &iters                                                            // outputs
 ) {
   if (PRINT)
     print_slack(N, B, A, b, c, v, n, m);
@@ -121,11 +123,11 @@ std::string simplex_slack(
 }
 
 std::string simplex(
-        double A[], double b[], double c[], long n, long m,
-        double &z, long* B, long &iters
+        flt A[], flt b[], flt c[], long n, long m,
+        flt &z, long* B, long &iters
 ) {
   long *N = new long[n];
-  double v;
+  flt v;
   iters = 0;
 
   // PHASE 1: Find initial solution.
@@ -141,9 +143,9 @@ std::string simplex(
       B[j] = n + j;
     v = 0;
   } else { // We have to solve an auxiliary problem, to find an initial solution.
-    double *auxA = new double[m * (n + 1)];
-    double *auxc = new double[n + 1];
-    double *auxb = new double[m];
+    flt *auxA = new flt[m * (n + 1)];
+    flt *auxc = new flt[n + 1];
+    flt *auxb = new flt[m];
     long *auxN = new long[n + 1];
     long *auxB = new long[m];
 
@@ -161,10 +163,10 @@ std::string simplex(
       }
     }
 
-    double auxv = 0;
+    flt auxv = 0;
     pivot(auxN, auxB, auxA, auxb, auxc, auxv, k, n, n + 1, m,
           auxN, auxB, auxA, auxb, auxc, auxv);
-    double auxz;
+    flt auxz;
     std::string result = simplex_slack(auxN, auxB, auxA, auxb, auxc, auxv, n + 1, m,
                                        auxz, iters);
     if (result != "success") {
@@ -213,7 +215,7 @@ std::string simplex(
     }
 
     // Build c
-    double *newc = new double[n];
+    flt *newc = new flt[n];
     for (long j = 0; j < n; j++) {
       newc[j] = N[j] < n ? c[N[j]] : 0;
       for (long i = 0; i < m; i++) {
@@ -244,30 +246,30 @@ void test() {
   // inputs
   long N[] = {0, 1, 2};
   long B[] = {3, 4, 5};
-  double A[] = {
+  flt A[] = {
           1, 1, 3,
           2, 2, 5,
           4, 1, 2
   };
-  double b[] = {
+  flt b[] = {
           30,
           24,
           36
   };
-  double c[] = {3, 1, 2};
-  double v = 0;
+  flt c[] = {3, 1, 2};
+  flt v = 0;
   long l = 2;
   long e = 0;
 
   // outputs
-  double nA[n * m];
-  double nb[m];
-  double nc[m];
-  double nv;
+  flt nA[n * m];
+  flt nb[m];
+  flt nc[m];
+  flt nv;
   long nN[m];
   long nB[n];
 
-  double z;
+  flt z;
   long iters = 0;
   // pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
 
@@ -285,16 +287,16 @@ void test() {
 }
 
 void testPhase1() {
-  double A[] = {
+  flt A[] = {
           2, -1,
           1, -5
   };
-  double b[] = {
+  flt b[] = {
           2,
           -4
   };
-  double c[] = {2, -1};
-  double z;
+  flt c[] = {2, -1};
+  flt z;
   long B[2];
   long iters;
   simplex(A, b, c, 2, 2,
@@ -311,7 +313,7 @@ void testFromFile() {
   if (scanf("%li", &n) != 1) printf("Invalid input!");
   long m = n;
 
-  double * A = new double[m*n];
+  flt * A = new flt[m*n];
   std::ifstream fileA;
   fileA.open(std::to_string(n) + "-A.csv");
   if (!fileA) std::cout << "Could not open file: " + std::to_string(n) + "-A.csv";
@@ -324,7 +326,7 @@ void testFromFile() {
   }
   fileA.close();
 
-  double * b = new double[m];
+  flt * b = new flt[m];
   std::ifstream fileb;
   fileb.open(std::to_string(n) + "-b.csv");
   if (!fileb) std::cout << "Could not open file: " + std::to_string(n) + "-b.csv";
@@ -335,7 +337,7 @@ void testFromFile() {
   }
   fileb.close();
 
-  double * c = new double[n];
+  flt * c = new flt[n];
   std::ifstream filec (std::to_string(n) + "-c.csv");
   for (long j = 0; j < n; j++) {
     std::string cell;
@@ -344,7 +346,7 @@ void testFromFile() {
   }
   filec.close();
 
-  double z;
+  flt z;
   long * B = new long[m];
 
   printf("Starting Linear Optimization...\n");
@@ -371,15 +373,15 @@ void testFromRand (int argc, char ** argv) {
   } else n = std::stol(argv[1]);
   long m = n;
 
-  double z;
+  flt z;
   long * B = new long[m];
 
-  std::uniform_real_distribution<double> unif(0., 1.);
+  std::uniform_real_distribution<flt> unif(0., 1.);
   std::default_random_engine re(12345);
 
-  double * A = new double[m*n];
-  double * b = new double[m];
-  double * c = new double[n];
+  flt * A = new flt[m*n];
+  flt * b = new flt[m];
+  flt * c = new flt[n];
   for (long i = 0; i < m; i++) {
     for (long j = 0; j < n; j++)
       A[index(i,j,n)] = unif(re);
