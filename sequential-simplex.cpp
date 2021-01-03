@@ -374,9 +374,8 @@ void testFromRand (int argc, char ** argv) {
   double z;
   long * B = new long[m];
 
-  srand(1);
   std::uniform_real_distribution<double> unif(0., 1.);
-  std::default_random_engine re;
+  std::default_random_engine re(12345);
 
   double * A = new double[m*n];
   double * b = new double[m];

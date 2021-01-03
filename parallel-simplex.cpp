@@ -8,6 +8,8 @@
 #include <cfloat>
 #include <chrono>
 
+using flt = double;
+flt F_MAX = DBL_MAX;
 
 struct result {
   double z;
@@ -21,7 +23,7 @@ enum STATUS {
   RUNNING, SUCCESS, UNBOUNDED
 };
 bool PRINT_TABLES = false;
-bool PROFILING = true;
+bool PROFILING = false;
 double lastTime;
 int NUM_STEPS = 9;
 double times[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -36,7 +38,7 @@ void stepFinished(long step, long s, long t) {
 
 long min(long a, long b) { return a <= b ? a : b; }
 
-void bsp_broadcast(double *x, long n, long src, long s0, long s, long stride, long p0, long phase) {
+void bsp_broadcast(flt *x, long n, long src, long s0, long s, long stride, long p0, long phase) {
   /* Broadcast the vector x of length n from processor src to
      processors s0+t*stride, 0 <= t < p0. Here n, p0 >= 1.
      The vector x must have been registered previously.
@@ -62,19 +64,19 @@ void bsp_broadcast(double *x, long n, long src, long s0, long s, long stride, lo
 
       long nbytes = min(b, n - t1 * b);
       if (nbytes > 0 && dest != src)
-        bsp_put(dest, &x[t1 * b], x, t1 * b * sizeof(double), min(b, n - t1 * b) * sizeof(double));
+        bsp_put(dest, &x[t1 * b], x, t1 * b * sizeof(flt), min(b, n - t1 * b) * sizeof(flt));
     }
   }
 }
 
-double **matallocd(size_t m, size_t n) {
-  /* This function allocates an m x n matrix of doubles */
+flt **matallocd(size_t m, size_t n) {
+  /* This function allocates an m x n matrix of flts */
   size_t i;
-  double *pd, **ppd;
-  ppd = new double *[m];
+  flt *pd, **ppd;
+  ppd = new flt *[m];
   if (ppd == NULL)
     bsp_abort("matallocd: not enough memory");
-  pd = new double[m * n];
+  pd = new flt[m * n];
   if (pd == NULL)
     bsp_abort("matallocd: not enough memory");
   ppd[0] = pd;
@@ -100,8 +102,8 @@ long nloc(long p, long s, long n) {
   return (n + p - s - 1) / p;
 }
 
-void matfreed(double **ppd) {
-  /* This function frees a matrix of doubles */
+void matfreed(flt **ppd) {
+  /* This function frees a matrix of flts */
   if (ppd != NULL) {
     if (ppd[0] != NULL)
       free(ppd[0]);
@@ -109,7 +111,7 @@ void matfreed(double **ppd) {
   }
 }
 
-void print_tableau(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b, double v,
+void print_tableau(long M, long N, long s, long t, long m, long n, flt **A, flt *c, flt *b, flt v,
                    long *Basis, long *NonBasis) {
   if (s == 0 && t == 0) {
     printf("--------------------\n");
@@ -140,24 +142,24 @@ void print_tableau(long M, long N, long s, long t, long m, long n, double **A, d
 
 struct IndexValuePair {
   long index;
-  double value;
+  flt value;
 };
 
-result simplex(long M, long N, long s, long t, long m, long n, double **A, double *c, double *b,
+result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, flt *b,
                long *Basis, long *NonBasis) {
   long locRows = nloc(M, s, m);
   long locCols = nloc(N, t, n);
-  double v = 0;
+  flt v = 0;
   auto *cLocalMaxima = new IndexValuePair[N];
   auto *baLocalMinima = new IndexValuePair[M];
   long e = -1; // Entering index
   long l = -1; // Leaving index
-  double *aie = new double[locRows];
-  double *alj = new double[locCols];
-  double bl;
-  double ce;
+  flt *aie = new flt[locRows];
+  flt *alj = new flt[locCols];
+  flt bl;
+  flt ce;
   int status = RUNNING;
-  double EPS = 1e-20;
+  flt EPS = 1e-20;
 
   for (long j = 0; j < n; j++)
     NonBasis[j] = j;
@@ -165,16 +167,16 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     Basis[i] = n + i;
 
 
-  bsp_push_reg(aie, locRows * sizeof(double));
-  bsp_push_reg(alj, locCols * sizeof(double));
-  bsp_push_reg(b, locRows * sizeof(double));
+  bsp_push_reg(aie, locRows * sizeof(flt));
+  bsp_push_reg(alj, locCols * sizeof(flt));
+  bsp_push_reg(b, locRows * sizeof(flt));
   bsp_push_reg(baLocalMinima, M * sizeof(IndexValuePair));
   bsp_push_reg(&e, sizeof(long));
   bsp_push_reg(&l, sizeof(long));
-  bsp_push_reg(&bl, sizeof(double));
+  bsp_push_reg(&bl, sizeof(flt));
   bsp_push_reg(&status, sizeof(int));
   bsp_push_reg(cLocalMaxima, N * sizeof(IndexValuePair));
-  bsp_push_reg(&ce, sizeof(double));
+  bsp_push_reg(&ce, sizeof(flt));
   bsp_sync();
   if (PROFILING) stepFinished(0, s, t);
 
@@ -188,7 +190,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     e = 0; // global column index
     if (s == 0) {
       long localMaxInd = -1;
-      double localMaxVal = 0;
+      flt localMaxVal = 0;
       for (long j = 0; j < locCols; j++) {
         if (c[j] > localMaxVal) {
           localMaxInd = j;
@@ -255,14 +257,14 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     long edivN = e / N;
 
     if (t == 0 && eModN != t)
-      bsp_put(s * N + eModN, b, b, 0, locRows * sizeof(double));
+      bsp_put(s * N + eModN, b, b, 0, locRows * sizeof(flt));
     if (eModN == t) {
       // Start two-phase broadcast of column e
       if (s == 0) {
         ce = c[edivN];
         for (long k = 0; k < N; k++) {
           if (k == t) continue;
-          bsp_put(0 * N + k, &ce, &ce, 0, sizeof(double));
+          bsp_put(0 * N + k, &ce, &ce, 0, sizeof(flt));
         }
       }
       for (long i = 0; i < locRows; i++)
@@ -272,10 +274,10 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
 
       // Now find maximum
       long localIndex = -1;
-      double localMin = DBL_MAX;
+      flt localMin = F_MAX;
       for (long i = 0; i < locRows; i++) {
         if (A[i][edivN] > EPS) {
-          double ba = b[i] / A[i][edivN];
+          flt ba = b[i] / A[i][edivN];
           if (ba < localMin) {
             localIndex = i;
             localMin = ba;
@@ -289,13 +291,13 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
       if (localMin >= 0) {
         for (long k = 0; k < M; k++) {
           if (k == s) continue;
-          baLocalMinima[k] = {.index=-1, .value=DBL_MAX};
+          baLocalMinima[k] = {.index=-1, .value=F_MAX};
           bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(IndexValuePair), sizeof(IndexValuePair));
         }
       } else {
         for (long k = 0; k < M; k++) {
           if (k == s) continue;
-          baLocalMinima[k] = {.index=-1, .value=DBL_MAX};
+          baLocalMinima[k] = {.index=-1, .value=F_MAX};
         }
       }
       bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 0);
@@ -368,7 +370,7 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
         bl = b[i];
         for (long k = 0; k < M; k++) {
           if (k == s) continue;
-          bsp_put(k * N + t, &bl, &bl, 0, sizeof(double));
+          bsp_put(k * N + t, &bl, &bl, 0, sizeof(flt));
         }
       }
     }
@@ -381,15 +383,14 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     bsp_sync();
     if (PROFILING) stepFinished(7, s, t);
 
-    auto start = std::chrono::high_resolution_clock::now();
+    //auto start = std::chrono::high_resolution_clock::now();
 
     // Compute rest of the constraints
     // Compute the coefficients of the remaining constraints.
-    /** We split up cases for s and t to get the best running time.
+
+
      for (long i = 0; i < locRows; i++) {
        if (lModM == s && i == lDivM) continue;
-       if (t == 0)
-         b[i] -= aie[i] * bl;
        for (long j = 0; j < locCols; j++) {
          if (eModN == t && j == edivN)
            A[i][j] = -A[i][j] * alj[j];
@@ -397,8 +398,34 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
            A[i][j] -= aie[i] * alj[j];
        }
      }
-     */
 
+    /** We  might split up cases for s and t to get the best running time. */
+
+    /**int cache1Size = 32 * 1024 / 8;
+    int blockSize = 8;
+
+    for (long offseti = 0; offseti < locRows; offseti += blockSize) {
+      for (long offsetj = 0; offsetj < locCols; offsetj += blockSize) {
+        for (long i = offseti; i < min(locRows, offseti + blockSize); i++) {
+          if (lModM == s && i == lDivM) continue;
+          for (long j = offsetj; j < min(locCols, offsetj + blockSize); j++) {
+            if (eModN == t && j == edivN)
+              A[i][j] = -A[i][j] * alj[j];
+            else
+              A[i][j] -= aie[i] * alj[j];
+          }
+        }
+      }
+    }*/
+
+    if (t == 0) {
+      for (long i = 0; i < locRows; i++) {
+        if (lModM == s && i == lDivM) continue;
+        b[i] -= aie[i] * bl;
+      }
+    }
+
+    /** Optimized code:
     if (eModN == t) {
       if (lModM == s) {
         if (t == 0) {
@@ -492,10 +519,10 @@ result simplex(long M, long N, long s, long t, long m, long n, double **A, doubl
     iterations++;
 
 
-    auto finish = std::chrono::high_resolution_clock::now();
-    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
+    /*auto finish = std::chrono::high_resolution_clock::now();
+    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start).count();
     double secs = ((double) ns) * 1e-9;
-    printf("(%li,%li): This took %lf\n", s, t, secs);
+    printf("(%li,%li): This took %lf\n", s, t, secs);*/
 
     if (PROFILING) stepFinished(8, s, t);
   }
@@ -533,23 +560,23 @@ void easy_test_one_proc() {
 
   int n = 3;
   int m = 3;
-  double dA[] = {
+  flt dA[] = {
           1, 1, 3,
           2, 2, 5,
           4, 1, 2
   };
-  double *A[] = {
+  flt *A[] = {
           &dA[0],
           &dA[3],
           &dA[6]
   };
-  double b[] = {
+  flt b[] = {
           30,
           24,
           36
   };
-  double c[] = {3, 1, 2};
-  double v = 0;
+  flt c[] = {3, 1, 2};
+  flt v = 0;
 
   long *Basis = new long[m];
   long *NonBasis = new long[n];
@@ -573,39 +600,39 @@ void easy_test_two_cols() {
   long *NonBasis = new long[n];
 
   if (t == 0) {
-    double dA[] = {
+    flt dA[] = {
             1, 3,
             2, 5,
             4, 2
     };
-    double *A[] = {
+    flt *A[] = {
             &dA[0],
             &dA[2],
             &dA[4]
     };
-    double b[] = {
+    flt b[] = {
             30,
             24,
             36
     };
-    double c[] = {3, 2};
-    double v = 0;
+    flt c[] = {3, 2};
+    flt v = 0;
 
     simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   } else {
-    double dA[] = {
+    flt dA[] = {
             1,
             2,
             1
     };
-    double *A[] = {
+    flt *A[] = {
             &dA[0],
             &dA[1],
             &dA[2]
     };
-    double *b;
-    double c[] = {1};
-    double v = 0;
+    flt *b;
+    flt c[] = {1};
+    flt v = 0;
     simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   }
   bsp_end();
@@ -626,33 +653,33 @@ void easy_test_two_rows() {
   long *NonBasis = new long[n];
 
   if (s == 0) {
-    double dA[] = {
+    flt dA[] = {
             1, 1, 3,
             4, 1, 2
     };
-    double *A[] = {
+    flt *A[] = {
             &dA[0],
             &dA[3]
     };
-    double b[] = {
+    flt b[] = {
             30,
             36
     };
-    double c[] = {3, 1, 2};
-    double v = 0;
+    flt c[] = {3, 1, 2};
+    flt v = 0;
     simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   } else {
-    double dA[] = {
+    flt dA[] = {
             2, 2, 5
     };
-    double *A[] = {
+    flt *A[] = {
             &dA[0]
     };
-    double b[] = {
+    flt b[] = {
             24
     };
-    double *c;
-    double v = 0;
+    flt *c;
+    flt v = 0;
     simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   }
   bsp_end();
@@ -687,27 +714,27 @@ long inputMatrixSize() {
   return n;
 }
 
-void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
+void distribute_and_run(long n, long m, flt **gA, flt *gb, flt *gc) {
   long s = bsp_pid() / N;
   long t = bsp_pid() % N;
 
   long nlr = nloc(M, s, m); /* number of local rows */
   long nlc = nloc(N, t, n); /* number of local columns */
-  double **A = matallocd(nlr, nlc);
-  double *b = new double[nlr];
-  double *c = new double[nlc];
-  bsp_push_reg(A[0], nlr * nlc * sizeof(double));
-  bsp_push_reg(b, nlr * nlc * sizeof(double));
-  bsp_push_reg(c, nlr * nlc * sizeof(double));
+  flt **A = matallocd(nlr, nlc);
+  flt *b = new flt[nlr];
+  flt *c = new flt[nlc];
+  bsp_push_reg(A[0], nlr * nlc * sizeof(flt));
+  bsp_push_reg(b, nlr * nlc * sizeof(flt));
+  bsp_push_reg(c, nlr * nlc * sizeof(flt));
   bsp_sync();
 
   if (s == 0 && t == 0) {
     if (nArg <= 0) printf("Now distributing the problem...\n");
-    long maxLRows = ceil(((double) m) / M);
-    long maxLCols = ceil(((double) n) / N);
-    double **lA = matallocd(M * N, maxLRows * maxLCols);
-    double **lb = matallocd(M, maxLRows);
-    double **lc = matallocd(N, maxLCols);
+    long maxLRows = ceil(((flt) m) / M);
+    long maxLCols = ceil(((flt) n) / N);
+    flt **lA = matallocd(M * N, maxLRows * maxLCols);
+    flt **lb = matallocd(M, maxLRows);
+    flt **lc = matallocd(N, maxLCols);
     for (long i = 0; i < m; i++) {
       for (long j = 0; j < n; j++) {
         lA[(i % M) * N + j % N][i / M * nloc(N, j % N, n) + j / N] = gA[i][j];
@@ -723,12 +750,12 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
 
     for (long i = 0; i < M; i++) {
       for (long j = 0; j < N; j++) {
-        bsp_put(i * N + j, lA[i * N + j], A[0], 0, nloc(M, i, m) * nloc(N, j, n) * sizeof(double));
+        bsp_put(i * N + j, lA[i * N + j], A[0], 0, nloc(M, i, m) * nloc(N, j, n) * sizeof(flt));
       }
-      bsp_put(i * N + 0, lb[i], b, 0, nloc(M, i, m) * sizeof(double));
+      bsp_put(i * N + 0, lb[i], b, 0, nloc(M, i, m) * sizeof(flt));
     }
     for (long j = 0; j < N; j++)
-      bsp_put(0 * N + j, lc[j], c, 0, nloc(N, j, n) * sizeof(double));
+      bsp_put(0 * N + j, lc[j], c, 0, nloc(N, j, n) * sizeof(flt));
 
     bsp_sync();
     matfreed(lA);
@@ -750,10 +777,10 @@ void distribute_and_run(long n, long m, double **gA, double *gb, double *gc) {
   bsp_sync();
   if (s == 0 && t == 0)
     lastTime = bsp_time();
-  double time0 = lastTime;
+  flt time0 = lastTime;
   result res = simplex(M, N, s, t, m, n, A, c, b, Basis, NonBasis);
   bsp_sync();
-  double time1 = bsp_time();
+  flt time1 = bsp_time();
 
   if (s == 0 && t == 0) {
     if (nArg <= 0) {
@@ -780,10 +807,10 @@ void simplex_from_file() {
   long n, m;
   n = m = inputMatrixSize();
 
-  double **gA, *gb, *gc;
+  flt **gA, *gb, *gc;
   if (bsp_pid() == 0) {
-    long maxLRows = ceil(((double) m) / M);
-    long maxLCols = ceil(((double) n) / N);
+    long maxLRows = ceil(((flt) m) / M);
+    long maxLCols = ceil(((flt) n) / N);
 
     gA = matallocd(M * N, maxLRows * maxLCols);
     gA = matallocd(m, n);
@@ -800,7 +827,7 @@ void simplex_from_file() {
     fileA.close();
 
 
-    gb = new double[m];
+    gb = new flt[m];
     std::ifstream fileb;
     fileb.open(std::to_string(n) + "-b.csv");
     if (!fileb) bsp_abort(("Could not open file: " + std::to_string(n) + "-b.csv").c_str());
@@ -812,7 +839,7 @@ void simplex_from_file() {
     fileb.close();
 
 
-    gc = new double[n];
+    gc = new flt[n];
     std::ifstream filec(std::to_string(n) + "-c.csv");
     for (long j = 0; j < n; j++) {
       std::string cell;
@@ -832,15 +859,14 @@ void simplex_from_rand() {
   long n, m;
   n = m = inputMatrixSize();
 
-  double **gA, *gb, *gc;
+  flt **gA, *gb, *gc;
   if (bsp_pid() == 0) {
-    srand(1);
-    std::uniform_real_distribution<double> unif(0., 1.);
+    std::uniform_real_distribution<flt> unif(0., 1.);
     std::default_random_engine re (12345);
 
     gA = matallocd(m, n);
-    gb = new double[m];
-    gc = new double[n];
+    gb = new flt[m];
+    gc = new flt[n];
     for (long i = 0; i < m; i++) {
       for (long j = 0; j < n; j++)
         gA[i][j] = unif(re);
