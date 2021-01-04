@@ -7,25 +7,29 @@
 #include <fstream>
 #include <cfloat>
 #include <chrono>
+#include <limits>
 
 using flt = double;
-flt F_MAX = DBL_MAX;
+flt F_MAX = std::numeric_limits<flt>::infinity();
+flt EPS = 1e-10;
+
+enum STATUS {
+  RUNNING, SUCCESS, UNBOUNDED
+};
 
 struct result {
   double z;
   long iters;
+  STATUS status;
 };
 
 long M, N;
 long nArg = -1;
 int Gargc;
-char ** Gargv;
+char **Gargv;
 
-enum STATUS {
-  RUNNING, SUCCESS, UNBOUNDED
-};
 bool PRINT_TABLES = false;
-bool PROFILING = false;
+bool PROFILING = true;
 double lastTime;
 int NUM_STEPS = 9;
 double times[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -113,7 +117,7 @@ void matfreed(flt **ppd) {
   }
 }
 
-void print_tableau(long M, long N, long s, long t, long m, long n, flt **A, flt *c, flt *b, flt v,
+void print_tableau(long s, long t, long m, long n, flt **A, flt *c, flt *b, flt v,
                    long *Basis, long *NonBasis) {
   if (s == 0 && t == 0) {
     printf("--------------------\n");
@@ -147,6 +151,190 @@ struct IndexValuePair {
   flt value;
 };
 
+void findColPhase1(long s, long t, long locCols, flt *c, IndexValuePair *cLocalMaxima) {
+  if (s == 0) {
+    long localMaxInd = -1;
+    flt localMaxVal = 0;
+    for (long j = 0; j < locCols; j++) {
+      if (c[j] > localMaxVal) {
+        localMaxInd = j;
+        localMaxVal = c[j];
+      }
+    }
+
+    // Broadcast local maximum, if there is a possible index
+    cLocalMaxima[t] = {.index = t + N * localMaxInd, .value = localMaxVal};
+    for (long k = 0; k < N; k++) {
+      if (k == t) continue;
+      cLocalMaxima[k] = {.index=-1, .value=0};
+      if (localMaxVal > EPS)
+        bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(IndexValuePair), sizeof(IndexValuePair));
+    }
+  }
+}
+
+void findColPhase2(long s, long t, IndexValuePair *cLocalMaxima, long &e, STATUS &status) {
+  if (s == 0) {
+    long globalMaximumProc = 0;
+    for (long k = 1; k < N; k++) {
+      if (cLocalMaxima[globalMaximumProc].value < cLocalMaxima[k].value)
+        globalMaximumProc = k;
+    }
+    e = cLocalMaxima[globalMaximumProc].index;
+
+    if (cLocalMaxima[globalMaximumProc].value <= EPS) {
+      status = SUCCESS;
+      for (long k = 0; k < M; k++) {
+        if (k == s) continue;
+        bsp_put(k * N + t, &status, &status, 0, sizeof(STATUS));
+      }
+    } else {
+      // Broadcast e to rest of the column
+      for (long k = 0; k < M; k++) {
+        if (k == s) continue;
+        bsp_put(k * N + t, &e, &e, 0, sizeof(long));
+      }
+    }
+  }
+}
+
+void findRowPhase1(long s, long t, long eModN, long locRows, flt *b) {
+  if (t == 0 && eModN != t)
+    bsp_put(s * N + eModN, b, b, 0, locRows * sizeof(flt));
+}
+
+void findRowPhase2(
+        long s, long t, long eModN, long eDivN, long locRows, flt **A, flt *b, IndexValuePair *baLocalMinima) {
+  if (eModN == t) { // Now find minimum
+    long localIndex = -1;
+    flt localMin = F_MAX;
+    for (long i = 0; i < locRows; i++) {
+      if (A[i][eDivN] > EPS) {
+        flt ba = b[i] / A[i][eDivN];
+        if (ba < localMin) {
+          localIndex = i;
+          localMin = ba;
+        }
+      }
+    }
+
+    baLocalMinima[s] = {.index=localIndex == -1 ? -1 : M * localIndex + s, .value=localMin};
+
+    // Distribute to the rest of column if valid
+    for (long k = 0; k < M; k++) {
+      if (k == s) continue;
+      baLocalMinima[k] = {.index=-1, .value=F_MAX};
+      if (localIndex > -1)
+        bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(IndexValuePair), sizeof(IndexValuePair));
+    }
+  }
+}
+
+void findRowPhase3(long s, long t, long eModN, IndexValuePair *baLocalMinima, STATUS &status, long e, long &l) {
+  if (eModN == t) {
+    long globalMinimumProc = 0;
+    for (long k = 1; k < M; k++) {
+      if (baLocalMinima[k].value < baLocalMinima[globalMinimumProc].value)
+        globalMinimumProc = k;
+    }
+
+    l = baLocalMinima[globalMinimumProc].index;
+    if (l == -1) {
+      status = UNBOUNDED;
+      for (long k = 0; k < N; k++) {
+        if (k == t) continue;
+        bsp_put(s * N + k, &status, &status, 0, sizeof(STATUS));
+      }
+    } else {
+      if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
+      // Now share l with the rest of the row
+      for (long k = 0; k < N; k++) {
+        if (k == t) continue;
+        bsp_put(s * N + k, &l, &l, 0, sizeof(long));
+      }
+    }
+  }
+}
+
+void pivotPhase1(long s, long t, long eModN, long eDivN, long locRows, flt &ce, flt *c, flt *aie, flt **A) {
+  if (eModN == t) {
+    // Start two-phase broadcast of column e
+    if (s == 0) {
+      ce = c[eDivN];
+      for (long k = 0; k < N; k++) {
+        if (k == t) continue;
+        bsp_put(0 * N + k, &ce, &ce, 0, sizeof(flt));
+      }
+    }
+    for (long i = 0; i < locRows; i++)
+      aie[i] = A[i][eDivN];
+  }
+  bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 0);
+}
+
+void pivotPhase2(
+        long s, long t, long lModM, long lDivM, long locCols, long eModN, long eDivN, flt *aie, flt *alj, flt **A,
+        flt *bl, flt *b) {
+  if (lModM == s) {
+    long i = lDivM;
+    for (long j = 0; j < locCols; j++) {
+      if (eModN == t && j == eDivN)
+        A[i][j] = 1 / aie[i];
+      else
+        A[i][j] /= aie[i];
+    }
+    if (t == 0)
+      b[i] /= aie[i];
+
+    // Distribute row to the rest of the column
+    for (long j = 0; j < locCols; j++)
+      alj[j] = A[i][j];
+    if (t == 0) {
+      *bl = b[i];
+      for (long k = 0; k < M; k++) {
+        if (k == s) continue;
+        bsp_put(k * N + t, bl, bl, 0, sizeof(flt));
+      }
+    }
+  }
+  bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 0);
+}
+
+void pivotPhase3(long s, long t, flt *alj, long locCols, long lModM) {
+  bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 1);
+}
+
+void pivotPhase4(
+        long s, long t, long locRows, long locCols, long eDivN, long eModN, long lModM, long lDivM,
+        flt **A, const flt *alj, const flt *aie, flt *b, flt bl, flt *c, flt ce, flt &v) {
+  for (long i = 0; i < locRows; i++) {
+    if (lModM == s && i == lDivM) continue;
+    for (long j = 0; j < locCols; j++) {
+      if (eModN == t && j == eDivN)
+        A[i][j] = -A[i][j] * alj[j];
+      else
+        A[i][j] -= aie[i] * alj[j];
+    }
+  }
+
+  if (t == 0) {
+    for (long i = 0; i < locRows; i++) {
+      if (lModM == s && i == lDivM) continue;
+      b[i] -= aie[i] * bl;
+    }
+  }
+  if (s == 0) {
+    for (long j = 0; j < locCols; j++) {
+      if (eModN == t && j == eDivN)
+        c[j] = -ce * alj[j];
+      else
+        c[j] -= ce * alj[j];
+    }
+    if (t == 0)
+      v += ce * bl;
+  }
+}
+
 result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, flt *b,
                long *Basis, long *NonBasis) {
   long locRows = nloc(M, s, m);
@@ -158,27 +346,25 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
   long l = -1; // Leaving index
   flt *aie = new flt[locRows];
   flt *alj = new flt[locCols];
-  flt bl;
-  flt ce;
-  int status = RUNNING;
-  flt EPS = 1e-20;
+  flt bl = 0;
+  flt ce = 0;
+  STATUS status = RUNNING;
 
   for (long j = 0; j < n; j++)
     NonBasis[j] = j;
   for (long i = 0; i < m; i++)
     Basis[i] = n + i;
 
-
   bsp_push_reg(aie, locRows * sizeof(flt));
   bsp_push_reg(alj, locCols * sizeof(flt));
   bsp_push_reg(b, locRows * sizeof(flt));
-  bsp_push_reg(baLocalMinima, M * sizeof(IndexValuePair));
   bsp_push_reg(&e, sizeof(long));
   bsp_push_reg(&l, sizeof(long));
   bsp_push_reg(&bl, sizeof(flt));
-  bsp_push_reg(&status, sizeof(int));
-  bsp_push_reg(cLocalMaxima, N * sizeof(IndexValuePair));
+  bsp_push_reg(&status, sizeof(STATUS));
   bsp_push_reg(&ce, sizeof(flt));
+  bsp_push_reg(baLocalMinima, M * sizeof(IndexValuePair));
+  bsp_push_reg(cLocalMaxima, N * sizeof(IndexValuePair));
   bsp_sync();
   if (PROFILING) stepFinished(0, s, t);
 
@@ -186,346 +372,60 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
 
   while (true) {
     if (PRINT_TABLES)
-      print_tableau(M, N, s, t, m, n, A, c, b, v, Basis, NonBasis);
+      print_tableau(s, t, m, n, A, c, b, v, Basis, NonBasis);
 
     // Find some e maximizing c[e]
     e = 0; // global column index
-    if (s == 0) {
-      long localMaxInd = -1;
-      flt localMaxVal = 0;
-      for (long j = 0; j < locCols; j++) {
-        if (c[j] > localMaxVal) {
-          localMaxInd = j;
-          localMaxVal = c[j];
-        }
-      }
+    findColPhase1(s, t, locCols, c, cLocalMaxima);
 
-      // Broadcast local maximum, if there is a possible index
-      if (localMaxVal > 0) {
-        cLocalMaxima[t] = {.index = t + N * localMaxInd, .value = localMaxVal};
-        for (long k = 0; k < N; k++) {
-          if (k == t) continue;
-          cLocalMaxima[k] = {.index=-1, .value=0};
-          bsp_put(0 * N + k, &cLocalMaxima[t], cLocalMaxima, t * sizeof(IndexValuePair), sizeof(IndexValuePair));
-        }
-      } else {
-        for (long k = 0; k < N; k++) {
-          cLocalMaxima[k] = {.index=-1, .value=0};
-        }
-      }
-      bsp_sync();
-      if (PROFILING) stepFinished(1, s, t);
+    bsp_sync();
+    if (PROFILING) stepFinished(1, s, t);
 
-      long globalMaximumProc = 0;
-      for (long k = 1; k < N; k++) {
-        if (cLocalMaxima[globalMaximumProc].value < cLocalMaxima[k].value)
-          globalMaximumProc = k;
-      }
-      e = cLocalMaxima[globalMaximumProc].index;
+    findColPhase2(s, t, cLocalMaxima, e, status);
 
+    bsp_sync();
+    if (PROFILING) stepFinished(2, s, t);
 
-      if (cLocalMaxima[globalMaximumProc].value <= EPS) {
-        status = SUCCESS;
-        for (long k = 0; k < M; k++) {
-          if (k == s) continue;
-          bsp_put(k * N + t, &status, &status, 0, sizeof(STATUS));
-        }
-        if (PRINT_TABLES && t == 0)
-          printf("Found an optimal solution!\n");
-        bsp_sync();
-        if (PROFILING) stepFinished(2, s, t);
-        break;
-      }
+    if (status == SUCCESS) break;
 
-      // Broadcast e to rest of the column
-      for (long k = 0; k < M; k++) {
-        if (k == s) continue;
-        bsp_put(k * N + t, &e, &e, 0, sizeof(long));
-      }
-      bsp_sync();
-      if (PROFILING) stepFinished(2, s, t);
-    } else {
-      bsp_sync();
-      if (PROFILING) stepFinished(1, s, t);
-      bsp_sync();
-      if (PROFILING) stepFinished(2, s, t);
-      if (status == SUCCESS) break;
-    }
-
-    // Find l with a_el > 0 minimizing b_l / a_el
-    // Do so by first distributing b_i to a_il
-    // At the same time, we share column e!
     long eModN = e % N;
-    long edivN = e / N;
+    long eDivN = e / N;
 
-    if (t == 0 && eModN != t)
-      bsp_put(s * N + eModN, b, b, 0, locRows * sizeof(flt));
-    if (eModN == t) {
-      // Start two-phase broadcast of column e
-      if (s == 0) {
-        ce = c[edivN];
-        for (long k = 0; k < N; k++) {
-          if (k == t) continue;
-          bsp_put(0 * N + k, &ce, &ce, 0, sizeof(flt));
-        }
-      }
-      for (long i = 0; i < locRows; i++)
-        aie[i] = A[i][edivN];
-      bsp_sync();
-      if (PROFILING) stepFinished(3, s, t);
+    findRowPhase1(s, t, eModN, locRows, b);
 
-      // Now find maximum
-      long localIndex = -1;
-      flt localMin = F_MAX;
-      for (long i = 0; i < locRows; i++) {
-        if (A[i][edivN] > EPS) {
-          flt ba = b[i] / A[i][edivN];
-          if (ba < localMin) {
-            localIndex = i;
-            localMin = ba;
-          }
-        }
-      }
+    bsp_sync();
+    if (PROFILING) stepFinished(3, s, t);
 
-      baLocalMinima[s] = {.index=M * localIndex + s, .value=localMin};
+    findRowPhase2(s, t, eModN, eDivN, locRows, A, b, baLocalMinima);
 
-      // Distribute to the rest of column if valid
-      if (localMin >= 0) {
-        for (long k = 0; k < M; k++) {
-          if (k == s) continue;
-          baLocalMinima[k] = {.index=-1, .value=F_MAX};
-          bsp_put(k * N + t, &baLocalMinima[s], baLocalMinima, s * sizeof(IndexValuePair), sizeof(IndexValuePair));
-        }
-      } else {
-        for (long k = 0; k < M; k++) {
-          if (k == s) continue;
-          baLocalMinima[k] = {.index=-1, .value=F_MAX};
-        }
-      }
-      bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 0);
-      bsp_sync();
-      if (PROFILING) stepFinished(4, s, t);
+    bsp_sync();
+    if (PROFILING) stepFinished(4, s, t);
 
-      bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
+    pivotPhase1(s, t, eModN, eDivN, locRows, ce, c, aie, A);
+    findRowPhase3(s, t, eModN, baLocalMinima, status, e, l);
 
-      long globalMinimumProc = 0;
-      for (long k = 1; k < M; k++) {
-        if (baLocalMinima[k].value < baLocalMinima[globalMinimumProc].value)
-          globalMinimumProc = k;
-      }
+    bsp_sync();
+    if (PROFILING) stepFinished(5, s, t);
 
-      l = baLocalMinima[globalMinimumProc].index;
-      if (l == -1) {
-        status = UNBOUNDED;
-        for (long k = 0; k < N; k++) {
-          if (k == t) continue;
-          bsp_put(s * N + k, &status, &status, 0, sizeof(STATUS));
-        }
-        if (PRINT_TABLES && s == 0) {
-          printf("Problem unbounded!\n");
-        }
-        bsp_sync();
-        if (PROFILING) stepFinished(5, s, t);
-        break;
-      }
-      if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
-
-      // Now share l with the rest of the row
-      for (long k = 0; k < N; k++) {
-        if (k == t) continue;
-        bsp_put(s * N + k, &l, &l, 0, sizeof(long));
-      }
-      bsp_sync();
-      if (PROFILING) stepFinished(5, s, t);
-    } else {
-      bsp_sync();
-      if (PROFILING) stepFinished(3, s, t);
-      bsp_sync();
-      if (PROFILING) stepFinished(4, s, t);
-
-      bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
-      bsp_sync();
-      if (PROFILING) stepFinished(5, s, t);
-
-      if (status == UNBOUNDED) break;
-    }
+    if (status == UNBOUNDED) break;
     swap(Basis[l], NonBasis[e]);
 
     // Now we compute row l
     long lModM = l % M;
     long lDivM = l / M;
-    if (lModM == s) { // Then processor handles row l
-      long i = lDivM;
-      for (long j = 0; j < locCols; j++) {
-        if (eModN == t && j == edivN)
-          A[i][j] = 1 / aie[i];
-        else
-          A[i][j] /= aie[i];
-      }
-      if (t == 0)
-        b[i] /= aie[i];
 
-      // Distribute row to the rest of the column
-      for (long j = 0; j < locCols; j++)
-        alj[j] = A[i][j];
-      if (t == 0) {
-        bl = b[i];
-        for (long k = 0; k < M; k++) {
-          if (k == s) continue;
-          bsp_put(k * N + t, &bl, &bl, 0, sizeof(flt));
-        }
-      }
-    }
+    pivotPhase2(s, t, lModM, lDivM, locCols, eModN, eDivN, aie, alj, A, &bl, b);
 
-    bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 0);
     bsp_sync();
     if (PROFILING) stepFinished(6, s, t);
 
-    bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 1);
+    pivotPhase3(s, t, alj, locCols, lModM);
+
     bsp_sync();
     if (PROFILING) stepFinished(7, s, t);
 
-    //auto start = std::chrono::high_resolution_clock::now();
-
-    // Compute rest of the constraints
-    // Compute the coefficients of the remaining constraints.
-
-
-    for (long i = 0; i < locRows; i++) {
-      if (lModM == s && i == lDivM) continue;
-      for (long j = 0; j < locCols; j++) {
-        if (eModN == t && j == edivN)
-          A[i][j] = -A[i][j] * alj[j];
-        else
-          A[i][j] -= aie[i] * alj[j];
-      }
-    }
-
-    /** We  might split up cases for s and t to get the best running time. */
-
-    /**int cache1Size = 32 * 1024 / 8;
-    int blockSize = 8;
-
-    for (long offseti = 0; offseti < locRows; offseti += blockSize) {
-      for (long offsetj = 0; offsetj < locCols; offsetj += blockSize) {
-        for (long i = offseti; i < min(locRows, offseti + blockSize); i++) {
-          if (lModM == s && i == lDivM) continue;
-          for (long j = offsetj; j < min(locCols, offsetj + blockSize); j++) {
-            if (eModN == t && j == edivN)
-              A[i][j] = -A[i][j] * alj[j];
-            else
-              A[i][j] -= aie[i] * alj[j];
-          }
-        }
-      }
-    }*/
-
-    if (t == 0) {
-      for (long i = 0; i < locRows; i++) {
-        if (lModM == s && i == lDivM) continue;
-        b[i] -= aie[i] * bl;
-      }
-    }
-
-    /** Optimized code:
-    if (eModN == t) {
-      if (lModM == s) {
-        if (t == 0) {
-          for (long i = 0; i < locRows; i++) {
-            if (i == lDivM) continue;
-            b[i] -= aie[i] * bl;
-            long j = 0;
-            for (; j < edivN; j++)
-              A[i][j] -= aie[i] * alj[j];
-            A[i][j] = -A[i][j] * alj[j];
-            for (j++; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        } else {
-          for (long i = 0; i < locRows; i++) {
-            if (i == lDivM) continue;
-            long j = 0;
-            for (; j < edivN; j++)
-              A[i][j] -= aie[i] * alj[j];
-            A[i][j] = -A[i][j] * alj[j];
-            for (j++; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        }
-      } else {
-        if (t == 0) {
-          for (long i = 0; i < locRows; i++) {
-            b[i] -= aie[i] * bl;
-            long j = 0;
-            for (; j < edivN; j++)
-              A[i][j] -= aie[i] * alj[j];
-            A[i][j] = -A[i][j] * alj[j];
-            for (j++; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        } else {
-          for (long i = 0; i < locRows; i++) {
-            long j = 0;
-            for (; j < edivN; j++)
-              A[i][j] -= aie[i] * alj[j];
-            A[i][j] = -A[i][j] * alj[j];
-            for (j++; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        }
-      }
-    } else {
-      if (lModM == s) {
-        if (t == 0) {
-          for (long i = 0; i < locRows; i++) {
-            if (i == lDivM) continue;
-            b[i] -= aie[i] * bl;
-            for (long j = 0; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        } else {
-          for (long i = 0; i < locRows; i++) {
-            if (i == lDivM) continue;
-            for (long j = 0; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        }
-      } else {
-        if (t == 0) {
-          for (long i = 0; i < locRows; i++) {
-            b[i] -= aie[i] * bl;
-            for (long j = 0; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        } else {
-          for (long i = 0; i < locRows; i++) {
-            for (long j = 0; j < locCols; j++)
-              A[i][j] -= aie[i] * alj[j];
-          }
-        }
-      }
-    }
-    /** End of optimized code **/
-
-
-    if (s == 0) {
-      for (long j = 0; j < locCols; j++) {
-        if (eModN == t && j == edivN)
-          c[j] = -ce * alj[j];
-        else
-          c[j] -= ce * alj[j];
-      }
-      if (t == 0)
-        v += ce * bl;
-    }
+    pivotPhase4(s, t, locRows, locCols, eDivN, eModN, lModM, lDivM, A, alj, aie, b, bl, c, ce, v);
     iterations++;
-
-
-    /*auto finish = std::chrono::high_resolution_clock::now();
-    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish - start).count();
-    double secs = ((double) ns) * 1e-9;
-    printf("(%li,%li): This took %lf\n", s, t, secs);*/
-
     if (PROFILING) stepFinished(8, s, t);
   }
 
@@ -548,7 +448,8 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
 
   return {
           .z =  v,
-          .iters = iterations
+          .iters = iterations,
+          .status = status
   };
 }
 
@@ -787,7 +688,12 @@ void distribute_and_run(long n, long m, flt **gA, flt *gb, flt *gc) {
 
   if (s == 0 && t == 0) {
     if (nArg <= 0) {
-      printf("End of Linear Optimization: Optimal value %lf using %li iterations.\n", res.z, res.iters);
+      printf("End of Linear Optimization\n");
+      if (res.status == SUCCESS)
+        printf("Success with optimal value %lf", res.z);
+      else if (res.status == UNBOUNDED)
+        printf("Unbounded (detected at value %lf)", res.z);
+      printf(" using %li iterations.\n", res.iters);
       printf("This took only %.6lf seconds.\n", time1 - time0);
       if (PROFILING) {
         for (long i = 0; i < NUM_STEPS; i++) {
@@ -818,7 +724,7 @@ void simplex_from_file() {
   flt **A, *b, *c;
   if (bsp_pid() == 0) {
     if (Gargc < 2) bsp_abort("Invalid number of arguments!");
-    std::string inputStr = std::string (Gargv[1]);
+    std::string inputStr = std::string(Gargv[1]);
     std::ifstream fileshape = std::ifstream(inputStr + "-shape.csv");
     if (!fileshape) std::cout << "Could not open file: " + inputStr + "-shape.csv";
     std::string cell;
@@ -859,11 +765,13 @@ void simplex_from_file() {
     filec.close();
   }
 
-  for (long k = 0; k < bsp_nprocs(); k++) {
-    bsp_put(k, &m, &m, 0, sizeof(long));
-    bsp_put(k, &n, &n, 0, sizeof(long));
-    bsp_put(k, &M, &M, 0, sizeof(long));
-    bsp_put(k, &N, &N, 0, sizeof(long));
+  if (bsp_pid() == 0) {
+    for (long k = 0; k < bsp_nprocs(); k++) {
+      bsp_put(k, &m, &m, 0, sizeof(long));
+      bsp_put(k, &n, &n, 0, sizeof(long));
+      bsp_put(k, &M, &M, 0, sizeof(long));
+      bsp_put(k, &N, &N, 0, sizeof(long));
+    }
   }
   bsp_sync();
 
@@ -907,7 +815,7 @@ void simplex_from_rand() {
 int main(int argc, char **argv) {
   Gargc = argc;
   Gargv = argv;
-  bsp_init(simplex_from_file, argc, argv);
+  bsp_init(simplex_from_rand, argc, argv);
 
   if (argc == 4) {
     M = std::stol(argv[1]);
@@ -925,6 +833,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  simplex_from_file();
+  simplex_from_rand();
   exit(EXIT_SUCCESS);
 }
