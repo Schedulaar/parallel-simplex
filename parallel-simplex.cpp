@@ -8,8 +8,8 @@
 #include <cfloat>
 #include <chrono>
 
-using flt = float;
-flt F_MAX = FLT_MAX;
+using flt = double;
+flt F_MAX = DBL_MAX;
 
 struct result {
   double z;
@@ -18,6 +18,8 @@ struct result {
 
 long M, N;
 long nArg = -1;
+int Gargc;
+char ** Gargv;
 
 enum STATUS {
   RUNNING, SUCCESS, UNBOUNDED
@@ -389,15 +391,15 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     // Compute the coefficients of the remaining constraints.
 
 
-     for (long i = 0; i < locRows; i++) {
-       if (lModM == s && i == lDivM) continue;
-       for (long j = 0; j < locCols; j++) {
-         if (eModN == t && j == edivN)
-           A[i][j] = -A[i][j] * alj[j];
-         else
-           A[i][j] -= aie[i] * alj[j];
-       }
-     }
+    for (long i = 0; i < locRows; i++) {
+      if (lModM == s && i == lDivM) continue;
+      for (long j = 0; j < locCols; j++) {
+        if (eModN == t && j == edivN)
+          A[i][j] = -A[i][j] * alj[j];
+        else
+          A[i][j] -= aie[i] * alj[j];
+      }
+    }
 
     /** We  might split up cases for s and t to get the best running time. */
 
@@ -685,33 +687,34 @@ void easy_test_two_rows() {
   bsp_end();
 }
 
-long inputMatrixSize() {
-  long n;
+void inputMatrixSize(long &n, long &m) {
+  bsp_push_reg(&m, sizeof(long));
   bsp_push_reg(&n, sizeof(long));
   bsp_push_reg(&M, sizeof(long));
   bsp_push_reg(&N, sizeof(long));
   bsp_sync();
   if (bsp_pid() == 0) {
     if (nArg <= 0) {
-      printf("Please enter matrix size n (nxn):\n");
-      if (scanf("%ld", &n) != 1) bsp_abort("Entered number invalid!\n");
-    } else n = nArg;
+      printf("Please enter matrix size nxm:\n");
+      if (scanf("%ldx%ld", &m, &n) != 2) bsp_abort("Entered number invalid!\n");
+    } else n = m = nArg;
     for (long q = 0; q < bsp_nprocs(); q++) {
       bsp_put(q, &M, &M, 0, sizeof(long));
       bsp_put(q, &N, &N, 0, sizeof(long));
+      bsp_put(q, &m, &m, 0, sizeof(long));
       bsp_put(q, &n, &n, 0, sizeof(long));
     }
     if (nArg <= 0) {
-      printf("Linear Optimization of %ld by %ld matrix\n", n, n);
+      printf("Linear Optimization of %ld by %ld matrix\n", m, n);
       printf("using the %ld by %ld cyclic distribution\n", M, N);
     } else printf(R"({"M": %li, "N": %li, "n": %li, )", M, N, n);
   }
   bsp_sync();
   bsp_pop_reg(&n);
+  bsp_pop_reg(&m);
   bsp_pop_reg(&N);
   bsp_pop_reg(&M);
   bsp_sync();
-  return n;
 }
 
 void distribute_and_run(long n, long m, flt **gA, flt *gb, flt *gc) {
@@ -804,52 +807,72 @@ void distribute_and_run(long n, long m, flt **gA, flt *gb, flt *gc) {
 void simplex_from_file() {
   bsp_begin(M * N);
 
-  long n, m;
-  n = m = inputMatrixSize();
+  long m, n;
 
-  flt **gA, *gb, *gc;
+  bsp_push_reg(&n, sizeof(long));
+  bsp_push_reg(&m, sizeof(long));
+  bsp_push_reg(&M, sizeof(long));
+  bsp_push_reg(&N, sizeof(long));
+  bsp_sync();
+
+  flt **A, *b, *c;
   if (bsp_pid() == 0) {
-    long maxLRows = ceil(((flt) m) / M);
-    long maxLCols = ceil(((flt) n) / N);
+    if (Gargc < 2) bsp_abort("Invalid number of arguments!");
+    std::string inputStr = std::string (Gargv[1]);
+    std::ifstream fileshape = std::ifstream(inputStr + "-shape.csv");
+    if (!fileshape) std::cout << "Could not open file: " + inputStr + "-shape.csv";
+    std::string cell;
+    std::getline(fileshape, cell);
+    m = std::stol(cell);
+    std::getline(fileshape, cell);
+    n = std::stol(cell);
+    fileshape.close();
 
-    gA = matallocd(M * N, maxLRows * maxLCols);
-    gA = matallocd(m, n);
-    std::ifstream fileA;
-    fileA.open(std::to_string(n) + "-A.csv");
-    if (!fileA) bsp_abort(("Could not open file: " + std::to_string(n) + "-A.csv").c_str());
+    A = matallocd(m, n);
+    std::ifstream fileA = std::ifstream(inputStr + "-A.csv");
+    if (!fileA) std::cout << "Could not open file: " + inputStr + "-A.csv";
     for (long i = 0; i < m; i++) {
       std::string cell;
       for (long j = 0; j < n; j++) {
-        if (!std::getline(fileA, cell, ',')) bsp_abort("Couldn't read A");
-        gA[i][j] = std::stod(cell);
+        if (!std::getline(fileA, cell, ',')) printf("Couldn't read A");
+        A[i][j] = std::stod(cell);
       }
     }
     fileA.close();
 
-
-    gb = new flt[m];
-    std::ifstream fileb;
-    fileb.open(std::to_string(n) + "-b.csv");
-    if (!fileb) bsp_abort(("Could not open file: " + std::to_string(n) + "-b.csv").c_str());
+    b = new flt[m];
+    std::ifstream fileb = std::ifstream(inputStr + "-b.csv");
+    if (!fileb) std::cout << "Could not open file: " + inputStr + "-b.csv";
     for (long i = 0; i < m; i++) {
-      std::string cell;
-      if (!std::getline(fileb, cell)) bsp_abort("Couldn't read b");
-      gb[i] = std::stod(cell);
+      if (!std::getline(fileb, cell)) printf("Couldn't read b");
+      b[i] = std::stod(cell);
     }
     fileb.close();
 
-
-    gc = new flt[n];
-    std::ifstream filec(std::to_string(n) + "-c.csv");
+    c = new flt[n];
+    std::ifstream filec = std::ifstream(inputStr + "-c.csv");
+    if (!filec) std::cout << "Could not open file: " + inputStr + "-c.csv";
     for (long j = 0; j < n; j++) {
-      std::string cell;
-      if (!std::getline(filec, cell)) bsp_abort("Couldn't read c");
-      gc[j] = std::stod(cell);
+      std::getline(filec, cell);
+      c[j] = std::stod(cell);
     }
     filec.close();
   }
 
-  distribute_and_run(n, m, gA, gb, gc);
+  for (long k = 0; k < bsp_nprocs(); k++) {
+    bsp_put(k, &m, &m, 0, sizeof(long));
+    bsp_put(k, &n, &n, 0, sizeof(long));
+    bsp_put(k, &M, &M, 0, sizeof(long));
+    bsp_put(k, &N, &N, 0, sizeof(long));
+  }
+  bsp_sync();
+
+  bsp_pop_reg(&m);
+  bsp_pop_reg(&n);
+  bsp_pop_reg(&M);
+  bsp_pop_reg(&N);
+
+  distribute_and_run(n, m, A, b, c);
 
   bsp_end();
 }
@@ -857,12 +880,12 @@ void simplex_from_file() {
 void simplex_from_rand() {
   bsp_begin(M * N);
   long n, m;
-  n = m = inputMatrixSize();
+  inputMatrixSize(n, m);
 
   flt **gA, *gb, *gc;
   if (bsp_pid() == 0) {
-    std::uniform_real_distribution<flt> unif(0., 1.);
-    std::default_random_engine re (12345);
+    std::uniform_real_distribution <flt> unif(0., 1.);
+    std::default_random_engine re(12345);
 
     gA = matallocd(m, n);
     gb = new flt[m];
@@ -882,7 +905,9 @@ void simplex_from_rand() {
 }
 
 int main(int argc, char **argv) {
-  bsp_init(simplex_from_rand, argc, argv);
+  Gargc = argc;
+  Gargv = argv;
+  bsp_init(simplex_from_file, argc, argv);
 
   if (argc == 4) {
     M = std::stol(argv[1]);
@@ -900,6 +925,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  simplex_from_rand();
+  simplex_from_file();
   exit(EXIT_SUCCESS);
 }
