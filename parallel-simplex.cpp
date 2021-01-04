@@ -29,8 +29,8 @@ int Gargc;
 char **Gargv;
 
 bool PRINT_TABLES = false;
-bool PROFILING = true;
-bool DEBUG = true;
+bool PROFILING = false;
+bool DEBUG = false;
 
 double lastTime;
 int NUM_STEPS = 9;
@@ -416,7 +416,10 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     if (PROFILING) stepFinished(5, s, t);
     if (s == 0 && t == 0 && PRINT_TABLES) printf("x%li enters; x%li leaves.\n", NonBasis[e], Basis[l]);
 
-    if (status == UNBOUNDED) break;
+    if (status == UNBOUNDED) {
+      v = F_MAX;
+      break;
+    }
     swap(Basis[l], NonBasis[e]);
 
     // Now we compute row l

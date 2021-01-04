@@ -114,6 +114,7 @@ std::string simplex_slack(
     if (l == -1) {
       char buffer [100];
       snprintf(buffer, 100, "unbounded in x%li (col %li)", N[e], e);
+      z = INF;
       return std::string(buffer);
     }
 
@@ -140,7 +141,6 @@ std::string simplex(
         flt &z, long* B, long &iters
 ) {
   long *N = new long[n];
-  flt v;
   iters = 0;
 
   // PHASE 1: Find initial solution.
@@ -154,7 +154,7 @@ std::string simplex(
       N[j] = j;
     for (long i = 0; i < m; i++)
       B[i] = n + i;
-    v = 0;
+    z = 0;
   } else { // We have to solve an auxiliary problem, to find an initial solution.
     flt *auxA = new flt[m * (n + 1)];
     flt *auxc = new flt[n + 1];
@@ -290,10 +290,10 @@ std::string simplex(
     }
 
     // Build v
-    v = 0;
+    z = 0;
     for (long i = 0; i < m; i++) {
       if (B[i] < n)
-        v += c[B[i]] * b[i];
+        z += c[B[i]] * b[i];
     }
 
     for (long j = 0; j < n; j++) c[j] = newc[j];
@@ -301,7 +301,7 @@ std::string simplex(
   }
 
   // PHASE 2: Find optimal solution.
-  return simplex_slack(N, B, A, b, c, v, n, m, INF,
+  return simplex_slack(N, B, A, b, c, z, n, m, INF,
                        z, iters);
 }
 
@@ -449,7 +449,7 @@ void testFromRand (int argc, char ** argv) {
   flt z;
   long * B = new long[m];
 
-  std::uniform_real_distribution<flt> unif(0., 1.);
+  std::uniform_real_distribution<flt> unif(-1., 1.);
   std::default_random_engine re(12345);
 
   flt * A = new flt[m*n];
@@ -458,7 +458,7 @@ void testFromRand (int argc, char ** argv) {
   for (long i = 0; i < m; i++) {
     for (long j = 0; j < n; j++)
       A[index(i,j,n)] = unif(re);
-    b[i] = unif(re);
+    b[i] = (unif(re) + 1)/2;
   }
   for (long j = 0; j < n; j++)
     c[j] = unif(re);
@@ -468,10 +468,10 @@ void testFromRand (int argc, char ** argv) {
   long iters = 0;
   auto start = std::chrono::high_resolution_clock::now();
 
-  simplex(A, b, c, n, m, z, B, iters);
+  std::string result = simplex(A, b, c, n, m, z, B, iters);
 
   auto finish = std::chrono::high_resolution_clock::now();
-  if (argc != 2) printf("Finished Linear Optimization with optimal value %lf\n", z);
+  if (argc != 2) printf("Finished Linear Optimization with result %s and optimal value %lf\n", result.c_str(), z);
   double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
   double s = ((double) ns) * 1e-9;
   if (argc != 2) printf("This took %lf seconds and %li iterations\n", s, iters);
@@ -484,6 +484,6 @@ void testFromRand (int argc, char ** argv) {
 }
 
 int main(int argc, char **argv) {
-  testFromFile();
+  testFromRand(argc, argv);
   return 0;
 }
