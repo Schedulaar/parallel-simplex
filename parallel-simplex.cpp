@@ -812,7 +812,7 @@ void simplex_from_rand() {
 
   flt **gA, *gb, *gc;
   if (bsp_pid() == 0) {
-    std::uniform_real_distribution <flt> unif(0., 1.);
+    std::uniform_real_distribution <flt> unif(-1., 1.);
     std::default_random_engine re(12345);
 
     gA = matallocd(m, n);
@@ -821,7 +821,7 @@ void simplex_from_rand() {
     for (long i = 0; i < m; i++) {
       for (long j = 0; j < n; j++)
         gA[i][j] = unif(re);
-      gb[i] = unif(re);
+      gb[i] = (unif(re) + 1) / 2;
     }
     for (long j = 0; j < n; j++)
       gc[j] = unif(re);
