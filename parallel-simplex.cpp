@@ -30,6 +30,8 @@ char **Gargv;
 
 bool PRINT_TABLES = false;
 bool PROFILING = true;
+bool DEBUG = true;
+
 double lastTime;
 int NUM_STEPS = 9;
 double times[] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -434,6 +436,17 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     pivotPhase5(s, t, locRows, locCols, eDivN, eModN, lModM, lDivM, A, alj, aie, b, bl, c, ce, v);
     iterations++;
     if (PROFILING) stepFinished(8, s, t);
+
+    if (DEBUG) {
+      for (long i = 0; i < locRows; i++) {
+        if (b[i] < 0) {
+          printf("Negative part of solution: b%li = %lf\n", Basis[s + M*i], b[i]);
+        }
+      }
+      if (s == 0 && t == 0 && iterations % 100 == 0) {
+        printf("k=%li, v=%lf\n", iterations, v);
+      }
+    }
   }
 
   bsp_pop_reg(aie);
