@@ -5,16 +5,20 @@
 #include <random>
 #include <fstream>
 #include <chrono>
+#include <limits>
 
-using flt = float;
+using flt = double;
+flt EPS = 1e-10;
+flt INF = std::numeric_limits<flt>::infinity();
 
 bool PRINT = false;
+bool DEBUG = false;
 
 long index(long i, long j, long rowLength) {
   return i * rowLength + j;
 }
 
-flt EPS = 1e-20;
+flt max(flt x, flt y) { return x >= y ? x : y; }
 
 void swap(long &x, long &y) {
   long tmp = x;
@@ -47,7 +51,7 @@ void pivot(
   // We will put x_N[e] into row l of the matrix and conversely put x_B[l] into column e.
 
   // Compute the coefficients of the equation for new basic variable x_N[e].
-  ob[l] = b[l] / A[index(l, e, n)];
+  ob[l] = max(b[l] / A[index(l, e, n)], 0);
   for (long j = 0; j < n; j++) {
     if (j == e) continue;
     oA[index(l, j, n)] = A[index(l, j, n)] / A[index(l, e, n)];
@@ -57,7 +61,7 @@ void pivot(
   // Compute the coefficients of the remaining constraints.
   for (long i = 0; i < m; i++) {
     if (i == l) continue;
-    ob[i] = b[i] - A[index(i, e, n)] * ob[l];
+    ob[i] = max(b[i] - A[index(i, e, n)] * ob[l], 0);
     for (long j = 0; j < n; j++) {
       if (j == e) continue;
       oA[index(i, j, n)] = A[index(i, j, n)] - A[index(i, e, n)] * oA[index(l, j, n)];
@@ -75,50 +79,59 @@ void pivot(
 
   // Compute new sets of basic and nonbasic variables
   if (oB != B || N != oN) {
-    for (long j = 0; j < m; j++) {
-      oB[j] = B[j];
-    }
     for (long i = 0; i < n; i++) {
-      oN[i] = N[i];
+      oB[i] = B[i];
+    }
+    for (long j = 0; j < n; j++) {
+      oN[j] = N[j];
     }
   }
   swap(oB[l], oN[e]);
 }
 
 std::string simplex_slack(
-        long N[], long B[], flt A[], flt b[], flt c[], flt v, long n, long m, // inputs
-        flt &z, long &iters                                                            // outputs
+        long N[], long B[], flt A[], flt b[], flt c[], flt v, long n, long m, flt maxZ, // inputs
+        flt &z, long &iters                                                             // outputs
 ) {
   if (PRINT)
     print_slack(N, B, A, b, c, v, n, m);
   long e = 0;
-  for (long j = 1; j < m; j++)
+  for (long j = 1; j < n; j++)
     e = c[j]>c[e] ? j : e;
-  while (c[e] > EPS) { // While there exists j with c_j > 0
+  while (c[e] > EPS) { // While there exists j with c_j > 0  && v <= maxZ - EPS
+
+    if (DEBUG && iters % 100 == 0) {
+      printf("k=%li, c[e]=%.17g, v=%.17g, maxZ-EPS=%.17g\n", iters, c[e], v, maxZ - EPS);
+    }
 
     // Find i in B minimizing b_i / a_ie
-    long imin = -1;
-    for (long i = 0; i < n; i++) {
+    long l = -1;
+    for (long i = 0; i < m; i++) {
       if (A[index(i, e, n)] > EPS &&
-          (imin == -1 || b[imin] / A[index(imin, e, n)] > b[i] / A[index(i, e, n)]))
-        imin = i;
+          (l == -1 || b[l] / A[index(l, e, n)] > b[i] / A[index(i, e, n)]))
+        l = i;
     }
-    if (imin == -1) return "unbounded";
+    if (l == -1) {
+      char buffer [100];
+      snprintf(buffer, 100, "unbounded in x%li (col %li)", N[e], e);
+      return std::string(buffer);
+    }
 
-    if (PRINT) printf("x%li enters; x%li leaves.\n", N[e], B[imin]);
+    if (PRINT) printf("x%li (col %li) enters; x%li (row %li) leaves.\n", N[e], e, B[l], l);
 
-    pivot(N, B, A, b, c, v, imin, e, n, m, // inputs
+    pivot(N, B, A, b, c, v, l, e, n, m, // inputs
           N, B, A, b, c, v);            // outputs
 
     if (PRINT) print_slack(N, B, A, b, c, v, n, m);
 
     e = 0;
-    for (long j = 1; j < m; j++)
+    for (long j = 1; j < n; j++)
       e = c[j]>c[e] ? j : e;
     iters++;
   }
   z = v;
 
+  if (DEBUG) printf("k=%li, c[e]=%.17g, v=%.17g, maxZ-EPS=%.17g\n", iters, c[e], v, maxZ - EPS);
   return "success";
 }
 
@@ -137,10 +150,10 @@ std::string simplex(
   for (long i = 1; i < m; i++)
     k = b[i] < b[k] ? i : k;
   if (b[k] >= 0) { // We can use the canonical slack form initially.
-    for (long i = 0; i < n; i++)
-      N[i] = i;
-    for (long j = 0; j < m; j++)
-      B[j] = n + j;
+    for (long j = 0; j < n; j++)
+      N[j] = j;
+    for (long i = 0; i < m; i++)
+      B[i] = n + i;
     v = 0;
   } else { // We have to solve an auxiliary problem, to find an initial solution.
     flt *auxA = new flt[m * (n + 1)];
@@ -149,45 +162,97 @@ std::string simplex(
     long *auxN = new long[n + 1];
     long *auxB = new long[m];
 
-    for (long i = 0; i < n + 1; i++) {
-      auxc[i] = i == n ? -1. : 0.;
-      auxN[i] = i == n ? n+m : i;
+    for (long j = 0; j < n; j++) {
+      auxc[j] = 0.;
+      auxN[j] = j;
     }
-    for (long j = 0; j < m; j++) {
-      auxB[j] = n + j;
-      auxb[j] = b[j];
+    auxc[n] = -1.;
+    auxN[n] = n+m;
+
+    for (long i = 0; i < m; i++) {
+      auxB[i] = n + i;
+      auxb[i] = b[i];
     }
     for (long i = 0; i < m; i++) {
-      for (long j = 0; j < n + 1; j++) {
-        auxA[index(i, j, n + 1)] = j == n ? -1. : A[index(i, j, n)];
+      for (long j = 0; j < n; j++) {
+        auxA[index(i, j, n + 1)] = A[index(i, j, n)];
+      }
+      auxA[index(i,n,n+1)] = -1.;
+    }
+
+    if (DEBUG) {
+      printf("Before auxilary pivot of e=n and l=%li\n", k);
+      for (long i = 0; i < m; i++) {
+        if (auxb[i] < 0) {
+          printf("b%li = %lf\n", i, auxb[i]);
+        }
       }
     }
 
     flt auxv = 0;
+    if (PRINT) { printf("Auxilary problem:\n"); print_slack(auxN, auxB, auxA, auxb, auxc, auxv, n+1, m); }
+
+
     pivot(auxN, auxB, auxA, auxb, auxc, auxv, k, n, n + 1, m,
           auxN, auxB, auxA, auxb, auxc, auxv);
+
+
+    if (DEBUG) {
+      printf("After auxilary pivot of e=n and l=%li\n", k);
+      for (long i = 0; i < m; i++) {
+        if (auxb[i] < 0) {
+          printf("b%li = %lf\n", i, auxb[i]);
+        }
+      }
+    }
+
     flt auxz;
-    std::string result = simplex_slack(auxN, auxB, auxA, auxb, auxc, auxv, n + 1, m,
-                                       auxz, iters);
+    std::string result = simplex_slack(auxN, auxB, auxA, auxb, auxc, auxv, n + 1, m, 0.,
+                                       auxv, iters);
+    auxz = auxv;
     if (result != "success") {
       printf("Could not solve the auxiliary problem for finding an initial value.\n"
-             "This should never happen.");
+             "This should never happen. Instead: %s\n", result.c_str());
       return "error";
     }
-    if (auxz > EPS) return "infeasible";
+    if (auxz < -EPS) {
+      if (DEBUG) printf("The problem was found to be infeasible.");
+      return "infeasible";
+    }
+
+
+    if (DEBUG) {
+      printf("Before degenerate pivot\n");
+      for (long i = 0; i < m; i++) {
+        if (auxb[i] < 0) {
+          printf("b%li = %lf\n", i, auxb[i]);
+        }
+      }
+    }
 
     // Check whether n+m is a basis variable. If so, do a non-degenerate pivot.
     for (long l = 0; l < m; l++) {
       if (auxB[l] == n + m){
         long e = 0;
-        for (long j = 1; j < m; j++) {
-          if (std::abs(auxA[index(e, j, n + 1)]) > std::abs(auxA[index(e, l, n + 1)]))
+        for (long j = 1; j < n; j++) {
+          if (std::abs(auxA[index(l, j, n + 1)]) > std::abs(auxA[index(l, e, n + 1)]))
             e = j;
         }
+        if (DEBUG) printf("Erasing the pivot to keep solution feasible: b[l]=%.17g\n", auxb[l]);
+        auxb[l] = 0;
         pivot(auxN, auxB, auxA, auxb, auxc, auxv, l, e, n + 1, m,
               auxN, auxB, auxA, auxb, auxc, auxv);
         iters++;
         break;
+      }
+    }
+
+    if (DEBUG) {
+      printf("After degenerate pivot\n");
+      for (long i = 0; i < m; i++) {
+        if (auxb[i] < 0) {
+          printf("b%li = %lf\n", i, auxb[i]);
+        }
       }
     }
 
@@ -220,7 +285,7 @@ std::string simplex(
       newc[j] = N[j] < n ? c[N[j]] : 0;
       for (long i = 0; i < m; i++) {
         if (B[i] < n)
-          newc[j] -= c[B[i]] * A[index(j, i, n)];
+          newc[j] -= c[B[i]] * A[index(i, j, n)];
       }
     }
 
@@ -236,7 +301,7 @@ std::string simplex(
   }
 
   // PHASE 2: Find optimal solution.
-  return simplex_slack(N, B, A, b, c, v, n, m,
+  return simplex_slack(N, B, A, b, c, v, n, m, INF,
                        z, iters);
 }
 
@@ -273,7 +338,7 @@ void test() {
   long iters = 0;
   // pivot(N, B, A, b, c, v, l, e, N, B, A, b, c, v);
 
-  std::string result = simplex_slack(N, B, A, b, c, v, n, m,
+  std::string result = simplex_slack(N, B, A, b, c, v, n, m, INF,
                                      z, iters);
   if (result == "success") {
     printf("Found optimal solution with objective value %lf:\n", z);
@@ -308,15 +373,25 @@ void testPhase1() {
 }
 
 void testFromFile() {
-  long n;
-  printf("Choose matrix size nxn!\n");
-  if (scanf("%li", &n) != 1) printf("Invalid input!");
-  long m = n;
+  char* inputFile = new char[100];
+  printf("Please enter problem name:\n");
+  if (scanf("%s", inputFile) != 1) printf("Entered problem name invalid!");
+  std::string inputStr = std::string(inputFile);
+
+
+  long m, n;
+  std::ifstream fileshape = std::ifstream(inputStr + "-shape.csv");
+  if (!fileshape) std::cout << "Could not open file: " + inputStr + "-shape.csv";
+  std::string cell;
+  std::getline(fileshape, cell);
+  m = std::stol(cell);
+  std::getline(fileshape, cell);
+  n = std::stol(cell);
+  fileshape.close();
 
   flt * A = new flt[m*n];
-  std::ifstream fileA;
-  fileA.open(std::to_string(n) + "-A.csv");
-  if (!fileA) std::cout << "Could not open file: " + std::to_string(n) + "-A.csv";
+  std::ifstream fileA = std::ifstream (inputStr + "-A.csv");
+  if (!fileA) std::cout << "Could not open file: " + inputStr + "-A.csv";
   for (long i = 0; i < m; i++) {
     std::string cell;
     for (long j = 0; j < n; j++) {
@@ -327,10 +402,8 @@ void testFromFile() {
   fileA.close();
 
   flt * b = new flt[m];
-  std::ifstream fileb;
-  fileb.open(std::to_string(n) + "-b.csv");
-  if (!fileb) std::cout << "Could not open file: " + std::to_string(n) + "-b.csv";
-  std::string cell;
+  std::ifstream fileb = std::ifstream (inputStr + "-b.csv");
+  if (!fileb) std::cout << "Could not open file: " + inputStr + "-b.csv";
   for (long i = 0; i < m; i++) {
     if(!std::getline(fileb, cell)) printf("Couldn't read b");
     b[i] = std::stod(cell);
@@ -338,9 +411,9 @@ void testFromFile() {
   fileb.close();
 
   flt * c = new flt[n];
-  std::ifstream filec (std::to_string(n) + "-c.csv");
+  std::ifstream filec = std::ifstream (inputStr + "-c.csv");
+  if (!filec) std::cout << "Could not open file: " + inputStr + "-c.csv";
   for (long j = 0; j < n; j++) {
-    std::string cell;
     std::getline(filec, cell);
     c[j] = std::stod(cell);
   }
@@ -353,10 +426,10 @@ void testFromFile() {
   long iters = 0;
   auto start = std::chrono::high_resolution_clock::now();
 
-  simplex(A, b, c, n, m, z, B, iters);
+  std::string result = simplex(A, b, c, n, m, z, B, iters);
 
   auto finish = std::chrono::high_resolution_clock::now();
-  printf("Finished Linear Optimization with optimal value %lf\n", z);
+  printf("Finished Linear Optimization with result %s (and optimal value %lf)\n", result.c_str(), z);
   std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count() << "ns\n";
 
   delete[] A;
@@ -411,6 +484,6 @@ void testFromRand (int argc, char ** argv) {
 }
 
 int main(int argc, char **argv) {
-  testFromRand(argc, argv);
+  testFromFile();
   return 0;
 }
