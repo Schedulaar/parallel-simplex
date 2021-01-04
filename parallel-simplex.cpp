@@ -143,6 +143,7 @@ void print_tableau(long s, long t, long m, long n, flt **A, flt *c, flt *b, flt 
     }
     if (s == 0 && t == 0)
       printf("\n");
+    bsp_sync();
   }
 }
 
@@ -230,7 +231,8 @@ void findRowPhase2(
   }
 }
 
-void findRowPhase3(long s, long t, long eModN, IndexValuePair *baLocalMinima, STATUS &status, long e, long &l) {
+void findRowPhase3(
+        long s, long t, long eModN, IndexValuePair *baLocalMinima, STATUS &status, long e, long &l) {
   if (eModN == t) {
     long globalMinimumProc = 0;
     for (long k = 1; k < M; k++) {
@@ -246,7 +248,6 @@ void findRowPhase3(long s, long t, long eModN, IndexValuePair *baLocalMinima, ST
         bsp_put(s * N + k, &status, &status, 0, sizeof(STATUS));
       }
     } else {
-      if (s == 0 && PRINT_TABLES) printf("%li enters; %li leaves.\n", e, l);
       // Now share l with the rest of the row
       for (long k = 0; k < N; k++) {
         if (k == t) continue;
@@ -272,7 +273,11 @@ void pivotPhase1(long s, long t, long eModN, long eDivN, long locRows, flt &ce, 
   bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 0);
 }
 
-void pivotPhase2(
+void pivotPhase2(long s, long t, long eModN, long locRows, flt *aie){
+  bsp_broadcast(aie, locRows, s * N + eModN, s * N + 0, s * N + t, 1, N, 1);
+}
+
+void pivotPhase3(
         long s, long t, long lModM, long lDivM, long locCols, long eModN, long eDivN, flt *aie, flt *alj, flt **A,
         flt *bl, flt *b) {
   if (lModM == s) {
@@ -300,11 +305,11 @@ void pivotPhase2(
   bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 0);
 }
 
-void pivotPhase3(long s, long t, flt *alj, long locCols, long lModM) {
+void pivotPhase4(long s, long t, flt *alj, long locCols, long lModM) {
   bsp_broadcast(alj, locCols, lModM * N + t, 0 * N + t, s * N + t, N, M, 1);
 }
 
-void pivotPhase4(
+void pivotPhase5(
         long s, long t, long locRows, long locCols, long eDivN, long eModN, long lModM, long lDivM,
         flt **A, const flt *alj, const flt *aie, flt *b, flt bl, flt *c, flt ce, flt &v) {
   for (long i = 0; i < locRows; i++) {
@@ -397,15 +402,17 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     if (PROFILING) stepFinished(3, s, t);
 
     findRowPhase2(s, t, eModN, eDivN, locRows, A, b, baLocalMinima);
+    pivotPhase1(s, t, eModN, eDivN, locRows, ce, c, aie, A);
 
     bsp_sync();
     if (PROFILING) stepFinished(4, s, t);
 
-    pivotPhase1(s, t, eModN, eDivN, locRows, ce, c, aie, A);
     findRowPhase3(s, t, eModN, baLocalMinima, status, e, l);
+    pivotPhase2(s, t, eModN, locRows, aie);
 
     bsp_sync();
     if (PROFILING) stepFinished(5, s, t);
+    if (s == 0 && t == 0 && PRINT_TABLES) printf("x%li enters; x%li leaves.\n", NonBasis[e], Basis[l]);
 
     if (status == UNBOUNDED) break;
     swap(Basis[l], NonBasis[e]);
@@ -414,17 +421,17 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     long lModM = l % M;
     long lDivM = l / M;
 
-    pivotPhase2(s, t, lModM, lDivM, locCols, eModN, eDivN, aie, alj, A, &bl, b);
+    pivotPhase3(s, t, lModM, lDivM, locCols, eModN, eDivN, aie, alj, A, &bl, b);
 
     bsp_sync();
     if (PROFILING) stepFinished(6, s, t);
 
-    pivotPhase3(s, t, alj, locCols, lModM);
+    pivotPhase4(s, t, alj, locCols, lModM);
 
     bsp_sync();
     if (PROFILING) stepFinished(7, s, t);
 
-    pivotPhase4(s, t, locRows, locCols, eDivN, eModN, lModM, lDivM, A, alj, aie, b, bl, c, ce, v);
+    pivotPhase5(s, t, locRows, locCols, eDivN, eModN, lModM, lDivM, A, alj, aie, b, bl, c, ce, v);
     iterations++;
     if (PROFILING) stepFinished(8, s, t);
   }
