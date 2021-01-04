@@ -1,7 +1,7 @@
-import smps_loader as loader
+from pysmps import smps_loader as loader
 
 
-def truncate(f, n=6):
+def truncate(f):
     """Truncates/pads a float f to n decimal places without rounding"""
     s = '{:f}'.format(f)
     s.strip("0")
