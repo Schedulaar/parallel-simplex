@@ -1,5 +1,7 @@
 import json
 
+procs = 5
+
 parTimesFile = open("par_times.json", encoding='utf-8')
 parJson = json.loads(parTimesFile.read())
 parTimesFile.close()
@@ -40,7 +42,7 @@ def find(pred, iterable):
     return None
 
 
-for N in range(1, 5):
+for N in range(1, procs + 1):
     last_n = 0
     coordinates = ""
     speedup_coordinates = ""
