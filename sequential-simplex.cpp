@@ -8,11 +8,11 @@
 #include <limits>
 
 using flt = double;
-flt EPS = 1e-9;
 flt INF = std::numeric_limits<flt>::infinity();
+flt EPS = 1e-9;
 
 bool PRINT = false;
-bool DEBUG = false;
+bool DEBUG = true;
 
 long index(long i, long j, long rowLength) {
   return i * rowLength + j;
@@ -98,7 +98,7 @@ std::string simplex_slack(
   long e = 0;
   for (long j = 1; j < n; j++)
     e = c[j]>c[e] ? j : e;
-  while (c[e] > EPS) { // While there exists j with c_j > 0  && v <= maxZ - EPS
+  while (c[e] > EPS) { // While there exists j with c_j > 0 && v <= maxZ - EPS
 
     if (DEBUG && iters % 100 == 0) {
       printf("k=%li, c[e]=%.17g, v=%.17g, maxZ-EPS=%.17g\n", iters, c[e], v, maxZ - EPS);
@@ -122,13 +122,13 @@ std::string simplex_slack(
 
     pivot(N, B, A, b, c, v, l, e, n, m, // inputs
           N, B, A, b, c, v);            // outputs
+    iters++;
 
     if (PRINT) print_slack(N, B, A, b, c, v, n, m);
 
     e = 0;
     for (long j = 1; j < n; j++)
       e = c[j]>c[e] ? j : e;
-    iters++;
   }
   z = v;
 
@@ -188,12 +188,13 @@ std::string simplex(
 
     pivot(auxN, auxB, auxA, auxb, auxc, auxv, k, n, n + 1, m,
           auxN, auxB, auxA, auxb, auxc, auxv);
+    iters++;
 
 
     if (DEBUG) {
       printf("After auxilary pivot of e=n and l=%li\n", k);
       for (long i = 0; i < m; i++) {
-        if (auxb[i] < 0) {
+        if (auxb[i] < 0.) {
           printf("b%li = %lf\n", i, auxb[i]);
         }
       }
@@ -275,7 +276,7 @@ std::string simplex(
     // Build c
     flt *newc = new flt[n];
     for (long j = 0; j < n; j++) {
-      newc[j] = N[j] < n ? c[N[j]] : 0;
+      newc[j] = N[j] < n ? c[N[j]] : 0.;
       for (long i = 0; i < m; i++) {
         if (B[i] < n)
           newc[j] -= c[B[i]] * A[index(i, j, n)];
@@ -365,12 +366,16 @@ void testPhase1() {
   }
 }
 
-void testFromFile() {
-  char* inputFile = new char[100];
-  printf("Please enter problem name:\n");
-  if (scanf("%s", inputFile) != 1) printf("Entered problem name invalid!");
-  std::string inputStr = std::string(inputFile);
-
+void testFromFile(int argc, char ** argv) {
+  std::string inputStr;
+  if (argc < 3) {
+    char* inputFile = new char[100];
+    printf("Please enter problem name:\n");
+    if (scanf("%s", inputFile) != 1) printf("Entered problem name invalid!");
+    std::string inputStr = std::string(inputFile);
+  } else {
+    inputStr = std::string(argv[2]);
+  }
 
   long m, n;
   std::ifstream fileshape = std::ifstream(inputStr + "-shape.csv");
@@ -415,15 +420,20 @@ void testFromFile() {
   flt z;
   long * B = new long[m];
 
-  printf("Starting Linear Optimization...\n");
+  if (argc < 3) printf("Starting Linear Optimization...\n");
   long iters = 0;
   auto start = std::chrono::high_resolution_clock::now();
 
   std::string result = simplex(A, b, c, n, m, z, B, iters);
 
   auto finish = std::chrono::high_resolution_clock::now();
-  printf("Finished Linear Optimization with result %s (and optimal value %lf)\n", result.c_str(), z);
-  std::cout << std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count() << "ns\n";
+  double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
+  double s = ((double) ns) * 1e-9;
+  if (argc < 3) {
+    printf("Finished Linear Optimization with result %s (and optimal value %lf)\n", result.c_str(), z);
+    printf("This took %lf seconds\n", s);
+  }
+  else printf(R"({"m": %li, "n": %li, "name": "%s", "t": %lf, "k": %li, "z": %lf},)" "\n", m, n, inputStr.c_str(), s, iters, z);
 
   delete[] A;
   delete[] B;
@@ -433,10 +443,10 @@ void testFromFile() {
 
 void testFromRand (int argc, char ** argv) {
   long n;
-  if (argc != 2) {
+  if (argc != 3) {
     printf("Choose matrix size nxn!\n");
     if (scanf("%li", &n) != 1) printf("Invalid input!");
-  } else n = std::stol(argv[1]);
+  } else n = std::stol(argv[2]);
   long m = n;
 
   flt z;
@@ -457,17 +467,17 @@ void testFromRand (int argc, char ** argv) {
     c[j] = unif(re);
 
 
-  if (argc != 2) printf("Starting Linear Optimization...\n");
+  if (argc != 3) printf("Starting Linear Optimization...\n");
   long iters = 0;
   auto start = std::chrono::high_resolution_clock::now();
 
   std::string result = simplex(A, b, c, n, m, z, B, iters);
 
   auto finish = std::chrono::high_resolution_clock::now();
-  if (argc != 2) printf("Finished Linear Optimization with result %s and optimal value %lf\n", result.c_str(), z);
+  if (argc != 3) printf("Finished Linear Optimization with result %s and optimal value %lf\n", result.c_str(), z);
   double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(finish-start).count();
   double s = ((double) ns) * 1e-9;
-  if (argc != 2) printf("This took %lf seconds and %li iterations\n", s, iters);
+  if (argc != 3) printf("This took %lf seconds and %li iterations\n", s, iters);
   else printf(R"({"n": %li, "t": %lf, "k": %li, "z": %lf},)" "\n", n, s, iters, z);
 
   delete[] A;
@@ -477,6 +487,13 @@ void testFromRand (int argc, char ** argv) {
 }
 
 int main(int argc, char **argv) {
-  testFromFile();
+  if (argc < 2) {
+    printf("Add file|rand as command line argument!\n");
+    exit(EXIT_FAILURE);
+  } else if (strcmp("file", argv[1]) == 0) {
+    testFromFile(argc, argv);
+  } else if (strcmp("rand", argv[1]) == 0) {
+    testFromRand(argc, argv);
+  }
   return 0;
 }
