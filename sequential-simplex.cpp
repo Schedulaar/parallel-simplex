@@ -216,6 +216,7 @@ std::string simplex(
     }
     if (auxz < -EPS) {
       if (DEBUG) printf("The problem was found to be infeasible.");
+      z = -INF;
       return "infeasible";
     }
 
@@ -447,7 +448,7 @@ void testFromRand (int argc, char ** argv) {
   for (long i = 0; i < m; i++) {
     for (long j = 0; j < n; j++)
       A[index(i,j,n)] = unif(re);
-    b[i] = (unif(re) + 1)/2;
+    b[i] = (1 + unif(re)) / 2;
   }
   for (long j = 0; j < n; j++)
     c[j] = unif(re);
