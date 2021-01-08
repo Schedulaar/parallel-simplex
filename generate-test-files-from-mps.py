@@ -1,5 +1,5 @@
 from pysmps import smps_loader as loader
-
+import sys
 
 def truncate(f):
     """Truncates/pads a float f to n decimal places without rounding"""
@@ -8,8 +8,7 @@ def truncate(f):
     i, p, d = s.partition('.')
     return '.'.join([i, d.rstrip("0")])
 
-
-result = loader.load_mps("25FV47.SIF")
+result = loader.load_mps("netlib/" + sys.argv[1] + ".SIF")
 
 (name, objective_name, row_names, col_names, _, types, c, A, rhs_names, rhs, bnd_names, bnd) = result
 
@@ -18,10 +17,10 @@ if len(rhs_names) != 1:
 
 b = rhs[rhs_names[0]]
 
-fA = open(name + "-A.csv", "w")
-fb = open(name + "-b.csv", "w")
-fc = open(name + "-c.csv", "w")
-fshape = open(name + "-shape.csv", "w")
+fA = open("netlib/" + name + "-A.csv", "w")
+fb = open("netlib/" + name + "-b.csv", "w")
+fc = open("netlib/" + name + "-c.csv", "w")
+fshape = open("netlib/" + name + "-shape.csv", "w")
 
 (m, n) = A.shape
 actualM = m
