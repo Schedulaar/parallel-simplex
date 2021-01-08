@@ -1,4 +1,4 @@
-from pysmps import smps_loader as loader
+import smps_loader as loader
 import sys
 
 def truncate(f):
