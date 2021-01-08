@@ -8,7 +8,7 @@ def truncate(f):
     i, p, d = s.partition('.')
     return '.'.join([i, d.rstrip("0")])
 
-result = loader.load_mps("netlib/" + sys.argv[1] + ".SIF")
+result = loader.load_mps("netlib/" + sys.argv[1])
 
 (name, objective_name, row_names, col_names, _, types, c, A, rhs_names, rhs, bnd_names, bnd) = result
 
