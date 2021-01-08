@@ -7,7 +7,7 @@
 module load 2019
 module load BSPonMPI/1.1-foss-2018b
 
-cd /home/bisselin/Students20/AnilMichael
+cd /home/bisselin/Students20/AnilMichael/parallel-simplex
 
 for n in 1000
 do
