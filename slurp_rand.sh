@@ -2,7 +2,7 @@
 
 #SBATCH -t 0-00:10:30
 #SBATCH -N 3
-#SBATCH --ntasks-per-node=10
+#SBATCH --ntasks-per-node=24
 
 module load 2019
 module load BSPonMPI/1.1-foss-2018b
