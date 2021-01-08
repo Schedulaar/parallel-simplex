@@ -8,7 +8,7 @@
 #include <limits>
 
 using flt = double;
-flt EPS = 1e-10;
+flt EPS = 1e-9;
 flt INF = std::numeric_limits<flt>::infinity();
 
 bool PRINT = false;
@@ -51,7 +51,7 @@ void pivot(
   // We will put x_N[e] into row l of the matrix and conversely put x_B[l] into column e.
 
   // Compute the coefficients of the equation for new basic variable x_N[e].
-  ob[l] = max(b[l] / A[index(l, e, n)], 0);
+  ob[l] = b[l] / A[index(l, e, n)];
   for (long j = 0; j < n; j++) {
     if (j == e) continue;
     oA[index(l, j, n)] = A[index(l, j, n)] / A[index(l, e, n)];
@@ -118,7 +118,7 @@ std::string simplex_slack(
       return std::string(buffer);
     }
 
-    if (PRINT) printf("x%li (col %li) enters; x%li (row %li) leaves.\n", N[e], e, B[l], l);
+    if (DEBUG) printf("x%li (col %li) enters; x%li (row %li) leaves. ce=%.17g\n", N[e], e, B[l], l, c[e]);
 
     pivot(N, B, A, b, c, v, l, e, n, m, // inputs
           N, B, A, b, c, v);            // outputs
@@ -180,14 +180,7 @@ std::string simplex(
       auxA[index(i,n,n+1)] = -1.;
     }
 
-    if (DEBUG) {
-      printf("Before auxilary pivot of e=n and l=%li\n", k);
-      for (long i = 0; i < m; i++) {
-        if (auxb[i] < 0) {
-          printf("b%li = %lf\n", i, auxb[i]);
-        }
-      }
-    }
+    if (DEBUG) printf("Before auxilary pivot of e=n and l=%li\n", k);
 
     flt auxv = 0;
     if (PRINT) { printf("Auxilary problem:\n"); print_slack(auxN, auxB, auxA, auxb, auxc, auxv, n+1, m); }
@@ -484,6 +477,6 @@ void testFromRand (int argc, char ** argv) {
 }
 
 int main(int argc, char **argv) {
-  testFromRand(argc, argv);
+  testFromFile();
   return 0;
 }
