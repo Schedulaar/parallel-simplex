@@ -28,7 +28,7 @@ long M, N;
 int Gargc;
 char **Gargv;
 
-bool PRINT_TABLES = false;
+bool PRINT = false;
 bool PROFILING = false;
 bool DEBUG = false;
 
@@ -165,7 +165,7 @@ struct IndexValuePair {
 void findColPhase1(long s, long t, long locCols, flt *c, IndexValuePair *cLocalMaxima) {
   if (s == 0) {
     long localMaxInd = -1;
-    flt localMaxVal = 0;
+    flt localMaxVal = 0.;
     for (long j = 0; j < locCols; j++) {
       if (c[j] > localMaxVal) {
         localMaxInd = j;
@@ -249,10 +249,10 @@ void findRowPhase3(
   if (eModN == t) {
     long globalMinimumProc = 0;
     for (long k = 1; k < M; k++) {
-      if (baLocalMinima[k].value < baLocalMinima[globalMinimumProc].value)
-        globalMinimumProc = k;
-      else if (baLocalMinima[k].value == baLocalMinima[globalMinimumProc].value
-               && baLocalMinima[k].index < baLocalMinima[globalMinimumProc].value)
+      if (baLocalMinima[k].value < baLocalMinima[globalMinimumProc].value || (
+              baLocalMinima[k].value == baLocalMinima[globalMinimumProc].value
+              && baLocalMinima[k].index < baLocalMinima[globalMinimumProc].index
+      ))
         globalMinimumProc = k;
     }
 
@@ -382,7 +382,7 @@ result simplex_slack(long s, long t, long m, long n, flt **A, flt *c, flt *b, fl
   status = RUNNING;
 
   while (true) {
-    if (PRINT_TABLES)
+    if (PRINT)
       print_tableau(s, t, m, n, A, c, b, v, Basis, NonBasis);
 
     // Find some e maximizing c[e]
@@ -425,7 +425,7 @@ result simplex_slack(long s, long t, long m, long n, flt **A, flt *c, flt *b, fl
       v = INF;
       break;
     }
-    if (PRINT_TABLES && s == 0 && t == 0)
+    if (PRINT && s == 0 && t == 0)
       printf("x%li (col %li) enters; x%li (row %li) leaves. ce=%.17g\n", NonBasis[e], e, Basis[l], l, ce);
 
 
@@ -529,7 +529,7 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
 
   l = -1;
   if (t == 0) {
-    flt minVal = 0;
+    flt minVal = 0.;
     for (long k = 0; k < M; k++) {
       if (baLocalMinima[k].value < minVal) {
         l = baLocalMinima[k].index;
@@ -556,8 +556,8 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     if (DEBUG && s == 0 && t == 0) printf("Initializing with Phase 0\n");
     flt **auxA = matallocd(auxLocRows, auxLocCols);
     flt *auxc = new flt[auxLocCols];
-    flt auxv = 0;
-    flt ce2 = 0;
+    flt auxv = 0.;
+    flt ce2 = 0.;
     bsp_push_reg(&ce2, sizeof(flt));
     bsp_sync();
     if (DEBUG && s == 0 && t == 0) printf("Pushed new register\n");
@@ -579,10 +579,10 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
       auxc[j] = 0.;
     if (n % N == t) {
       auxc[n / N] = -1.;
-      c[n / N] = 0;
+      c[n / N] = 0.;
     }
 
-    if (PRINT_TABLES) print_tableau(s, t, m, n + 1, auxA, auxc, b, auxv, Basis, NonBasis);
+    if (PRINT) print_tableau(s, t, m, n + 1, auxA, auxc, b, auxv, Basis, NonBasis);
 
     // Move the new auxiliary variable into the basis. Remove l with b_l minimal.
     if (DEBUG && s == 0 && t == 0) printf("Pivot auxiliary variable into the basis, l=%li.\n", l);
@@ -598,6 +598,7 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     pivotPhase5(s, t, auxLocRows, auxLocCols, n / N, n % N, l % M, l / M, auxA, alj, aie, b, bl, auxc, ce, auxv, c,
                 ce2, v);
     bsp_sync();
+    iterations++;
     if (DEBUG && s == 0 && t == 0) printf("Pivot succeeded. Solving auxiliary problem.\n");
 
     l = -1;
@@ -625,7 +626,7 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
     for (l = 0; l < m; l++) {
       if (Basis[l] == n + m) {
         if (DEBUG && s == 0 && t == 0) printf("We need a degenerate pivot. l=%li\n", l);
-        /** DO A DEGENERATE PIVOT. FIRST FIND E WITH MAXIMAL ABS VALUE OF A_LE **/
+        /** DO A NON DEGENERATE PIVOT. FIRST FIND E WITH MAXIMAL ABS VALUE OF A_LE **/
         e = -1;
         if (l % M == s) {
           if (t == 0) {
@@ -633,7 +634,7 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
             b[l / M] = 0;
           }
           long localIndex = -1;
-          flt localMax = 0;
+          flt localMax = 0.;
           for (long j = 0; j < auxLocCols; j++) {
             flt abs = std::abs(auxA[l / M][j]);
             if (abs > localMax) {
@@ -641,9 +642,9 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
               localMax = abs;
             }
           }
-          cLocalMaxima[s] = {.index=localIndex == -1 ? -1 : N * localIndex + t, .value=localMax};
+          cLocalMaxima[t] = {.index=localIndex == -1 ? -1 : N * localIndex + t, .value=localMax};
 
-          // Distribute to the rest of column
+          // Distribute to the rest of row
           for (long k = 0; k < N; k++) {
             if (k == t) continue;
             cLocalMaxima[k] = {.index=-1, .value=-1.};
@@ -653,13 +654,15 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
         }
         bsp_sync();
         if (l % M == s) {
-          flt globalMax = -1.;
-          for (long k = 0; k < N; k++) {
-            if (cLocalMaxima[k].value > globalMax) {
-              globalMax = cLocalMaxima[k].value;
-              e = cLocalMaxima[k].index;
+          long globalMaxProc = 0;
+          for (long k = 1; k < N; k++) {
+            if (cLocalMaxima[k].value > cLocalMaxima[globalMaxProc].value ||
+                (cLocalMaxima[k].value == cLocalMaxima[globalMaxProc].value &&
+                 cLocalMaxima[k].index < cLocalMaxima[globalMaxProc].index)) {
+              globalMaxProc = k;
             }
           }
+          e = cLocalMaxima[globalMaxProc].index;
 
           // Distribute with rest of column
           for (long k = 0; k < M; k++) {
@@ -805,7 +808,7 @@ void easy_test_one_proc() {
           36
   };
   flt c[] = {3, 1, 2};
-  flt v = 0;
+  flt v = 0.;
 
   long *Basis = new long[m];
   long *NonBasis = new long[n];
@@ -948,10 +951,10 @@ void distribute_and_run(long n, long m, flt **gA, flt *gb, flt *gc) {
   long nlc = nloc(N, t, n); /* number of local columns */
   flt **A = matallocd(nlr, nlc);
   flt *b = new flt[nlr];
-  flt *c = new flt[nloc(N, t, n+1)];
+  flt *c = new flt[nloc(N, t, n + 1)];
   bsp_push_reg(A[0], nlr * nlc * sizeof(flt));
   bsp_push_reg(b, nlr * nlc * sizeof(flt));
-  bsp_push_reg(c, nlr * nloc(N, t, n+1) * sizeof(flt));
+  bsp_push_reg(c, nlr * nloc(N, t, n + 1) * sizeof(flt));
   bsp_sync();
 
   if (s == 0 && t == 0) {
