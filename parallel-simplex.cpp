@@ -450,15 +450,15 @@ result simplex_slack(long s, long t, long m, long n, flt **A, flt *c, flt *b, fl
     iterations++;
     if (PROFILING) stepFinished(8, s, t);
 
-    if (DEBUG) {
+    if (DEBUG && PRINT) {
       for (long i = 0; i < locRows; i++) {
         if (b[i] < 0) {
           printf("k=%li: Negative part of solution: b%li = %lf\n", iterations, Basis[s + M * i], b[i]);
         }
       }
-      if (s == 0 && t == 0 && iterations % 100 == 0) {
-        printf("k=%li, ce=%.17g, v=%.17g, v2=%.17g\n", iterations, ce, v, v2);
-      }
+    }
+    if (DEBUG && s == 0 && t == 0 && iterations % 200 == 0) {
+      printf("k=%li, ce=%.17g, v=%.17g, v2=%.17g\n", iterations, ce, v, v2);
     }
   }
   if (DEBUG && s == 0 && t == 0) printf("k=%li, ce=%.17g, v=%.17g, v2=%.17g\n", iterations, ce, v, v2);
@@ -490,9 +490,9 @@ result simplex(long M, long N, long s, long t, long m, long n, flt **A, flt *c, 
   STATUS status = RUNNING;
   long iterations = 0;
 
-  bsp_push_reg(aie, auxLocRows * sizeof(flt));
-  bsp_push_reg(alj, auxLocCols * sizeof(flt));
-  bsp_push_reg(b, auxLocRows * sizeof(flt));
+  bsp_push_reg(aie, max(auxLocRows, 1) * sizeof(flt));
+  bsp_push_reg(alj, max(auxLocCols, 1) * sizeof(flt));
+  bsp_push_reg(b, max(auxLocRows, 1) * sizeof(flt));
   bsp_push_reg(&e, sizeof(long));
   bsp_push_reg(&l, sizeof(long));
   bsp_push_reg(&bl, sizeof(flt));
@@ -952,9 +952,9 @@ void distribute_and_run(long n, long m, flt **gA, flt *gb, flt *gc) {
   flt **A = matallocd(nlr, nlc);
   flt *b = new flt[nlr];
   flt *c = new flt[nloc(N, t, n + 1)];
-  bsp_push_reg(A[0], nlr * nlc * sizeof(flt));
-  bsp_push_reg(b, nlr * nlc * sizeof(flt));
-  bsp_push_reg(c, nlr * nloc(N, t, n + 1) * sizeof(flt));
+  bsp_push_reg(A[0], max(nlr * nlc, 1) * sizeof(flt));
+  bsp_push_reg(b, max(nlr * nlc, 1) * sizeof(flt));
+  bsp_push_reg(c, max(nlr * nloc(N, t, n + 1),1) * sizeof(flt));
   bsp_sync();
 
   if (s == 0 && t == 0) {
@@ -1150,7 +1150,7 @@ void simplex_from_rand() {
 
   flt **gA, *gb, *gc;
   if (bsp_pid() == 0) {
-    std::uniform_real_distribution <flt> unif(-1., 1.);
+    std::uniform_real_distribution <flt> unif(0., 1.);
     std::default_random_engine re(12345);
 
     gA = matallocd(m, n);
@@ -1159,7 +1159,7 @@ void simplex_from_rand() {
     for (long i = 0; i < m; i++) {
       for (long j = 0; j < n; j++)
         gA[i][j] = unif(re);
-      gb[i] = (1 + unif(re)) / 2;
+      gb[i] = unif(re);
     }
     for (long j = 0; j < n; j++)
       gc[j] = unif(re);
